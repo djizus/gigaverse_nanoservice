@@ -1,0 +1,32 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "resolveJsonModule": true,
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"],
+      "@/domains/*": ["src/domains/*"],
+      "@/shared/*": ["src/shared/*"],
+      "@/infrastructure/*": ["src/infrastructure/*"],
+      "@/api/*": ["src/api/*"]
+    }
+  },
+  "include": [
+    "src/**/*",
+    "server.ts",
+    "client.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "server.old.ts"
+  ]
+}
