@@ -1,15 +1,16 @@
-# AI Assistant Nano Service
+# Gigaverse Dungeon Nanoservice
 
-This example demonstrates how to create a paid AI assistant service using
-Daydreams and x402 payment middleware. Users pay $0.1 per request to interact
-with the AI assistant.
+A real-time dungeon running service for Gigaverse with micropayment integration. This service provides paid dungeon runs with real-time event logging using x402 micropayments on Base Sepolia and Supabase for live database updates.
 
 ## Features
 
-- 💰 **Micropayments**: $0.1 per AI request using x402
-- 🧠 **Stateful Sessions**: Maintains conversation history per session
-- 🔧 **Context-Aware**: Remembers previous queries and interactions
-- 🚀 **Production Ready**: Built with Hono for high performance
+- 🏰 **Real-time Dungeon Runs**: Automated Gigaverse dungeon execution with live event streaming
+- 💰 **Micropayments**: $0.01 per dungeon run using x402 on Base Sepolia
+- ⚡ **Live Updates**: Real-time event logging to Supabase for immediate client updates
+- 🧠 **Smart Gameplay**: Context-driven combat and loot decisions using heuristics
+- 🛡️ **Duplicate Prevention**: Prevents double charging with 5-minute timeout recovery
+- 🔄 **Multi-Run Support**: Execute multiple dungeon runs in a single paid request
+- 🚀 **Production Ready**: Built with Hono, deployed on Google Cloud Run
 
 ## Setup
 
@@ -19,22 +20,35 @@ with the AI assistant.
 bun install
 ```
 
-2. Create a `.env` file with your configuration:
+2. Set up the database:
+
+```bash
+# Create database tables (Supabase or PostgreSQL)
+psql -d your_database -f database/schema.sql
+```
+
+3. Create a `.env` file with your configuration:
 
 ```env
 # x402 Payment Configuration
-FACILITATOR_URL=
-ADDRESS=0xYourWalletAddressHere
+FACILITATOR_URL=https://facilitator.x402.rs
+ADDRESS=0xYourPaymentAddress  # Ethereum address to receive payments
 NETWORK=base-sepolia
+PRIVATE_KEY=0xYourPrivateKey  # For client-side payment signing
 
-// For payments
-PRIVATE_KEY=
+# Supabase Configuration (Real-time Database)
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_KEY=your_supabase_key_here
+
+# Optional
+PORT=4021  # Default service port
 ```
 
-3. Run the server:
+4. Run the server:
 
 ```bash
-bun run dev
+bun run dev     # Development server
+bun run start   # Production server
 ```
 
 The server will start on port 4021.
@@ -47,96 +61,146 @@ Returns information about the service and available endpoints.
 
 ### GET `/health` - Health Check (Free)
 
-Returns the service status.
+Returns the service status and database connectivity.
 
-### POST `/assistant` - AI Assistant ($0.01 per request)
+### POST `/dungeon` - Start Dungeon Runs ($0.01 per run)
 
-Send a query to the AI assistant.
+Execute automated dungeon runs with real-time event logging.
 
 **Request Body:**
 
 ```json
 {
-  "query": "Your question here",
-  "sessionId": "optional-session-id"
+  "context": "Be aggressive in combat, prioritize attack upgrades when looting",
+  "playerAddress": "0xE0CBF5Ef2B9E52A9CcC084a6Ab5e48E0E955C9b1",
+  "gigaverseToken": "eyJhbGciOiJIUzI1NiJ9...",
+  "totalRuns": 3,
+  "dungeonId": 1,
+  "isJuiced": false,
+  "consumables": [],
+  "gearInstanceIds": []
 }
 ```
 
-**Response:**
+**Response (Immediate):**
 
 ```json
 {
-  "response": "AI assistant's response",
-  "sessionId": "session-id",
-  "requestCount": 5
+  "runId": "09c133df-0f47-49f3-8784-3db6061c4957",
+  "status": "started", 
+  "message": "Dungeon run started! Subscribe to real-time updates for runId: 09c133df-...",
+  "payment": {
+    "totalPrice": 0.03,
+    "pricePerRun": 0.01,
+    "currency": "USD"
+  },
+  "instructions": {
+    "message": "Subscribe to real-time updates using the runId",
+    "subscription": "Subscribe to table 'run_events' with filter 'dungeon_run_id=eq.09c133df-...'"
+  }
 }
 ```
 
 ## Example Usage
 
-### Using the x402 Client
+### Running Dungeon Tests
 
-The included client demonstrates automatic payment handling using `x402-fetch`:
+```bash
+# Run basic dungeon request
+bun run client
+
+# Run with payment examples  
+bun run client:examples
+
+# Test deployed service health
+bun run test:deployed
+```
+
+### Real-time Event Subscription
+
+After starting a dungeon run, subscribe to live updates using the returned `runId`:
 
 ```javascript
-import { wrapFetchWithPayment } from "x402-fetch";
-import { privateKeyToAccount } from "viem/accounts";
+// Supabase real-time subscription
+const supabase = createClient(supabaseUrl, supabaseKey);
 
-// Create payment-enabled fetch
-const account = privateKeyToAccount(privateKey);
-const fetchWithPayment = wrapFetchWithPayment(fetch, account);
-
-// Make a paid request - payment is handled automatically
-const response = await fetchWithPayment("http://localhost:4021/assistant", {
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({ query: "Hello AI!" }),
-});
-
-// Get payment details
-const paymentInfo = decodeXPaymentResponse(
-  response.headers.get("x-payment-response")
-);
-console.log("Payment:", paymentInfo);
+supabase
+  .channel('dungeon-events')
+  .on('postgres_changes', 
+    { 
+      event: 'INSERT', 
+      schema: 'public', 
+      table: 'run_events',
+      filter: `dungeon_run_id=eq.${runId}`
+    }, 
+    (payload) => {
+      const { event_type, message, event_data } = payload.new;
+      console.log(`[${event_type}] ${message}`, event_data);
+    }
+  )
+  .subscribe();
 ```
+
+### Event Types
+
+- `run_started` - Dungeon run begins
+- `room_entered` - Player enters new room  
+- `combat_move` - Combat action taken
+- `battle_result` - Combat outcome
+- `room_cleared` - Room completed successfully
+- `loot_selected` - Loot choice made
+- `run_completed` - Individual run finished
+- `all_runs_completed` - All runs in session finished
+- `error` - Error occurred during run
 
 ## How It Works
 
-1. **Payment Middleware**: The x402 middleware handles micropayments before
-   requests reach the AI
-2. **Context Management**: Each session maintains its own context and
-   conversation history
-3. **Memory Persistence**: The agent remembers previous interactions within a
-   session
-4. **Rate Limiting**: Built-in through the payment requirement
+1. **Client Request**: Player submits dungeon run request with payment
+2. **Duplicate Check**: Service checks for existing active runs (prevents double charging)  
+3. **Payment Processing**: x402 middleware handles USDC payment on Base Sepolia
+4. **Immediate Response**: Service returns runId and subscription instructions
+5. **Background Execution**: Dungeon runs execute asynchronously with real-time logging
+6. **Live Updates**: All events streamed to Supabase for real-time client updates
 
-## Architecture
+## Architecture Flow
 
 ```
-Client Request → x402 Payment → Daydreams Agent → Response
-                     ↓
-                  Payment
-                 Processing
+Client Request → Pricing Middleware → x402 Payment → Dungeon Controller → Background Processing
+                     ↓                      ↓                ↓                       ↓
+                Calculate Price    Process USDC Payment  Return runId      Heuristic Game Execution
+                ($0.01 per run)    (Base Sepolia Network)      ↓                       ↓
+                                                        Client Subscribes → Real-time Database Events
+                                                        (Supabase Realtime)    (Combat, Loot, Progress)
 ```
+
+## Database Schema
+
+- **`dungeon_runs`** - Main run sessions with status tracking
+- **`run_logs`** - Individual run details within a session  
+- **`run_events`** - Real-time events (combat moves, loot selection, room progression)
 
 ## Customization
 
 You can customize:
 
-- **Pricing**: Change the price in the middleware configuration
-- **Model**: Switch to different AI models (gpt-4, claude, etc.)
-- **Context**: Modify the assistant's behavior and memory structure
-- **Actions**: Add custom actions for specific functionality
+- **Pricing**: Modify pricing logic in `src/domains/payment/pricing.service.ts`
+- **Combat Strategy**: Update heuristics in `src/domains/gigaverse/gigaverse.utils.ts`
+- **Event Logging**: Add custom events in `src/domains/dungeon/dungeon.service.ts`
+- **Database Schema**: Extend tables in `database/schema.sql`
+- **Middleware**: Add custom validation or processing steps
 
-## Client Examples
+## Features
 
-The `client.ts` file shows how to interact with the nano service:
+### Duplicate Prevention
+- Prevents multiple active runs for same player
+- 5-minute timeout for crashed agents (auto-recovery)
+- Smart detection of different dungeon conflicts
 
-```bash
-# Run example requests
-bun run client:examples
-
-```
+### Heuristic Decision System
+- **Context-Driven Gameplay**: Analyzes user context for optimal decisions
+- **Combat Strategy**: Smart rock/paper/scissors based on enemy patterns  
+- **Loot Selection**: Prioritizes upgrades based on player strategy
+- **Risk Management**: Health/shield monitoring for survival
 
 ## Deployment to Google Cloud Run
 

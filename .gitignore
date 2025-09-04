@@ -18,13 +18,13 @@ yarn-error.log*
 .env.production.local
 .env.production
 
-# Database files
+# Database files (but keep schema)
 *.sqlite
 *.sqlite3
 *.db
-*.sql
 database.sql
-schema.sql
+backup.sql
+dump.sql
 
 # Build artifacts
 dist/

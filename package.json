@@ -1,16 +1,23 @@
 {
-  "name": "ai-assistant-nanoservice",
+  "name": "gigaverse-dungeon-nanoservice",
   "version": "1.0.0",
+  "description": "Real-time dungeon running service for Gigaverse with micropayment integration",
   "type": "module",
   "private": true,
   "scripts": {
     "dev": "bun run server.ts",
     "start": "bun run server.ts",
-    "test": "bun run test-dungeon.ts",
-    "test:duplicate": "bun run test-dungeon.ts --duplicate",
+    "client": "bun run test-dungeon.ts",
+    "client:examples": "bun run test-dungeon.ts --duplicate",
     "deploy": "./deploy.sh",
     "deploy:prod": "GCP_PROJECT_ID=your-prod-project ./deploy.sh",
     "test:deployed": "curl https://ai-assistant.agent.daydreams.systems/health"
+  },
+  "keywords": ["gigaverse", "dungeon", "nanoservice", "x402", "micropayments", "real-time"],
+  "author": "Daydreams AI",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/daydreamsai/gigaverse-dungeon-nanoservice"
   },
   "dependencies": {
     "@ai-sdk/openai": "^2.0.23",
