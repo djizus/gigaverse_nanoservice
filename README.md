@@ -7,7 +7,7 @@ A real-time dungeon running service for Gigaverse with micropayment integration.
 - 🏰 **Real-time Dungeon Runs**: Automated Gigaverse dungeon execution with live event streaming
 - 💰 **Micropayments**: $0.01 per dungeon run using x402 on Base Sepolia
 - ⚡ **Live Updates**: Real-time event logging to Supabase for immediate client updates
-- 🧠 **Smart Gameplay**: Context-driven combat and loot decisions using heuristics
+- 🧠 **Daydreams Agent Decisions**: Agent-only combat and loot decisions via Daydreams Router (no fallback)
 - 🛡️ **Duplicate Prevention**: Prevents double charging with 5-minute timeout recovery
 - 🔄 **Multi-Run Support**: Execute multiple dungeon runs in a single paid request
 - 🚀 **Production Ready**: Built with Hono, deployed on Google Cloud Run
@@ -152,6 +152,9 @@ supabase
 - `run_completed` - Individual run finished
 - `all_runs_completed` - All runs in session finished
 - `error` - Error occurred during run
+- `agent_decision_move` - Daydreams agent returned a move
+- `agent_decision_loot` - Daydreams agent returned a loot choice
+- `agent_error` - Daydreams agent failed (timeout/validation/provider)
 
 ## How It Works
 
@@ -167,8 +170,8 @@ supabase
 ```
 Client Request → Pricing Middleware → x402 Payment → Dungeon Controller → Background Processing
                      ↓                      ↓                ↓                       ↓
-                Calculate Price    Process USDC Payment  Return runId      Heuristic Game Execution
-                ($0.01 per run)    (Base Sepolia Network)      ↓                       ↓
+                Calculate Price    Process USDC Payment  Return runId      Agent-Driven Game Execution
+                 ($0.01 per run)    (Base Sepolia Network)      ↓                       ↓
                                                         Client Subscribes → Real-time Database Events
                                                         (Supabase Realtime)    (Combat, Loot, Progress)
 ```
@@ -178,6 +181,17 @@ Client Request → Pricing Middleware → x402 Payment → Dungeon Controller �
 - **`dungeon_runs`** - Main run sessions with status tracking
 - **`run_logs`** - Individual run details within a session  
 - **`run_events`** - Real-time events (combat moves, loot selection, room progression)
+
+If upgrading from a previous version, update the `run_events.event_type` constraint to include agent events:
+
+```sql
+ALTER TABLE run_events DROP CONSTRAINT IF EXISTS run_events_event_type_check;
+ALTER TABLE run_events ADD CONSTRAINT run_events_event_type_check CHECK (
+  event_type IN (
+    'run_started','room_entered','combat_move','battle_result','loot_phase','loot_selected','room_cleared','run_completed','all_runs_completed','error','agent_decision_move','agent_decision_loot','agent_error'
+  )
+);
+```
 
 ## Customization
 
@@ -196,8 +210,12 @@ You can customize:
 - 5-minute timeout for crashed agents (auto-recovery)
 - Smart detection of different dungeon conflicts
 
-### Heuristic Decision System
-- **Context-Driven Gameplay**: Analyzes user context for optimal decisions
+### Daydreams Agent Mode
+- Enable with `USE_DAYDREAMS_AGENT=true` and set `DREAMS_ROUTER_API_KEY`.
+- Model default: `google-vertex/gemini-2.5-flash` (override with `DAYDREAMS_MODEL`).
+- Timeout default: `2000ms` (override with `DAYDREAMS_TIMEOUT_MS`).
+- Behavior: If the agent is disabled, times out, or returns invalid output, the run fails immediately (no fallback).
+- Health: `/health` includes agent `enabled`, `model`, and `timeoutMs`.
 - **Combat Strategy**: Smart rock/paper/scissors based on enemy patterns  
 - **Loot Selection**: Prioritizes upgrades based on player strategy
 - **Risk Management**: Health/shield monitoring for survival

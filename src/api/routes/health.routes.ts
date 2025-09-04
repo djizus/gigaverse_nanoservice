@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { aiConfig } from "../../infrastructure/config/ai.config";
 
 export const createHealthRoutes = () => {
   const app = new Hono();
@@ -9,6 +10,11 @@ export const createHealthRoutes = () => {
       status: "ok",
       service: "Game Activities Nano Service",
       timestamp: new Date().toISOString(),
+      daydreamsAgent: {
+        enabled: aiConfig.enabled && !!aiConfig.apiKey,
+        model: aiConfig.model,
+        timeoutMs: aiConfig.timeoutMs,
+      },
     });
   });
 

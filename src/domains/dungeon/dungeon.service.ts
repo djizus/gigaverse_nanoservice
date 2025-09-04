@@ -6,8 +6,6 @@ import {
 import { GigaverseGameClient } from '../gigaverse/gigaverse.client';
 import { 
   parseDungeonState,
-  suggestBestMove, 
-  suggestBestLoot,
   formatError,
   sleep,
   formatBattleSummary
@@ -15,12 +13,17 @@ import {
 import { DatabaseService } from '../../infrastructure/database/database.service';
 import { logError, logSuccess, throwError, formatError as formatErrorMessage } from '../../shared/utils/error.utils';
 import { CreateDungeonRunInput, RunLog } from '../../infrastructure/database/types';
+import { DaydreamsAgentService, RoomDecisionHistoryItem } from '../../infrastructure/ai/daydreams.agent';
+import { aiConfig } from '../../infrastructure/config/ai.config';
 
 const ACTION_DELAY_MS = 2000; // Delay between actions to avoid rate limiting
 
 export class DungeonService {
-  constructor(private databaseService: DatabaseService) {
+  private agent: DaydreamsAgentService | null;
+
+  constructor(private databaseService: DatabaseService, agent?: DaydreamsAgentService | null) {
     // Now depends on database service for real-time logging
+    this.agent = agent || null;
   }
 
   async initialize(): Promise<void> {
@@ -131,6 +134,7 @@ export class DungeonService {
       console.log(`[TokenDebug] Client initialized - initial token: ${gameClient.getActionToken()}`);
       
       // Execute all requested runs
+      let aborted = false;
       for (let runNumber = 1; runNumber <= totalRuns; runNumber++) {
         console.log(`\n🗡️ Processing run ${runNumber}/${totalRuns}...`);
         console.log(`[TokenDebug] Starting run ${runNumber} - initial token: ${gameClient.getActionToken()}`);
@@ -173,6 +177,11 @@ export class DungeonService {
         
         if (success) {
           completedRuns++;
+        } else {
+          // Execution failed (agent error or other). Abort remaining runs.
+          aborted = true;
+          console.log(`⛔ Aborting remaining runs after failure at run ${runNumber}/${totalRuns}`);
+          break;
         }
         
         // Longer delay between runs to let game settle
@@ -187,19 +196,23 @@ export class DungeonService {
         }
       }
 
-      // Mark as completed
-      await this.databaseService.completeDungeonRun(dungeonRunId, completedRuns);
+      if (!aborted) {
+        // Mark as completed
+        await this.databaseService.completeDungeonRun(dungeonRunId, completedRuns);
 
-      // Log completion event (session-level, no specific run log)
-      await this.databaseService.createRunEvent({
-        dungeon_run_id: dungeonRunId,
-        run_log_id: null, // null for session-level events
-        event_type: 'all_runs_completed',
-        message: `All dungeon runs completed! ${completedRuns}/${totalRuns} successful`,
-        event_data: { completedRuns, totalRuns, successRate: (completedRuns / totalRuns) * 100 }
-      });
+        // Log completion event (session-level, no specific run log)
+        await this.databaseService.createRunEvent({
+          dungeon_run_id: dungeonRunId,
+          run_log_id: null, // null for session-level events
+          event_type: 'all_runs_completed',
+          message: `All dungeon runs completed! ${completedRuns}/${totalRuns} successful`,
+          event_data: { completedRuns, totalRuns, successRate: (completedRuns / totalRuns) * 100 }
+        });
 
-      console.log(`✅ Completed all runs for ${dungeonRunId}: ${completedRuns}/${totalRuns} successful`);
+        console.log(`✅ Completed all runs for ${dungeonRunId}: ${completedRuns}/${totalRuns} successful`);
+      } else {
+        console.log(`❌ Dungeon run ${dungeonRunId} aborted after failure; not marking as completed.`);
+      }
       
     } catch (error) {
       logError({ operation: 'Background processing', module: 'DungeonService', details: { dungeonRunId } }, error);
@@ -258,7 +271,16 @@ export class DungeonService {
       const maxHP = dungeonState.player?.health?.currentMax || 100;
 
       // Step 2: Main dungeon loop - fight, loot, or complete
+      // Track per-room decision memory
+      let currentRoomNumber = dungeonState.currentRoom;
+      let roomDecisionHistory: RoomDecisionHistoryItem[] = [];
+
       while (!dungeonState.isComplete && dungeonState.player?.health?.current > 0) {
+        // Reset room memory if room changed
+        if (dungeonState.currentRoom !== currentRoomNumber) {
+          currentRoomNumber = dungeonState.currentRoom;
+          roomDecisionHistory = [];
+        }
         
         if (dungeonState.lootPhase && dungeonState.lootOptions.length > 0) {
           // Loot phase - use heuristics for best loot option
@@ -270,8 +292,54 @@ export class DungeonService {
             { lootOptions: dungeonState.lootOptions }
           );
           
-          const lootChoice = suggestBestLoot(dungeonState.lootOptions, dungeonState.player, context);
-          lootChoices.push(lootChoice);
+          // Agent-only decision for loot
+          if (!this.agent || !this.agent.isEnabled) {
+            const msg = 'Daydreams agent disabled or not configured';
+            await this.databaseService.logEvent(
+              dungeonRunId,
+              runLog.id,
+              'agent_error',
+              msg,
+              { reason: 'disabled_or_missing_key' }
+            );
+            await this.databaseService.updateRunLog(runLog.id, { status: 'error', error_message: msg });
+            await this.databaseService.failDungeonRun(dungeonRunId, msg);
+            return false;
+          }
+
+          let lootChoice: any;
+          try {
+            const lootDecision = await this.agent.suggestLoot({
+              context,
+              options: dungeonState.lootOptions,
+              player: dungeonState.player,
+              roomDecisionHistory,
+            });
+
+            await this.databaseService.logEvent(
+              dungeonRunId,
+              runLog.id,
+              'agent_decision_loot',
+              `Agent loot decision: ${lootDecision.loot}`,
+              { reason: lootDecision.reason }
+            );
+
+            lootChoice = lootDecision.loot;
+            lootChoices.push(lootChoice);
+            roomDecisionHistory.push({ kind: 'loot', choice: lootChoice, reason: lootDecision.reason });
+          } catch (err) {
+            const message = `Agent loot decision failed: ${formatErrorMessage(err)}`;
+            await this.databaseService.logEvent(
+              dungeonRunId,
+              runLog.id,
+              'agent_error',
+              message,
+              { phase: 'loot', error: formatErrorMessage(err) }
+            );
+            await this.databaseService.updateRunLog(runLog.id, { status: 'error', error_message: message });
+            await this.databaseService.failDungeonRun(dungeonRunId, message);
+            return false;
+          }
           
           const lootData = {
             consumables,
@@ -282,7 +350,7 @@ export class DungeonService {
           };
           
           await sleep(ACTION_DELAY_MS);
-          const lootResponse = await gameClient.selectLoot(lootChoice, dungeonId, lootData);
+          const lootResponse = await gameClient.selectLoot(lootChoice as any, dungeonId, lootData);
           
           if (!lootResponse.success) {
             throw new Error(`Loot selection failed: ${lootResponse.message}`);
@@ -319,8 +387,58 @@ export class DungeonService {
             }
           );
           
-          const move = suggestBestMove(dungeonState.player, dungeonState.enemy, context);
-          moves.push(move);
+          // Agent-only decision for move
+          if (!this.agent || !this.agent.isEnabled) {
+            const msg = 'Daydreams agent disabled or not configured';
+            await this.databaseService.logEvent(
+              dungeonRunId,
+              runLog.id,
+              'agent_error',
+              msg,
+              { reason: 'disabled_or_missing_key' }
+            );
+            await this.databaseService.updateRunLog(runLog.id, { status: 'error', error_message: msg });
+            await this.databaseService.failDungeonRun(dungeonRunId, msg);
+            return false;
+          }
+
+          let move: any;
+          try {
+            const moveDecision = await this.agent.suggestMove({
+              context,
+              state: {
+                currentRoom: dungeonState.currentRoom,
+                player: dungeonState.player,
+                enemy: dungeonState.enemy,
+                lastBattleResult: dungeonState.lastBattleResult,
+              },
+              roomDecisionHistory,
+            });
+
+            await this.databaseService.logEvent(
+              dungeonRunId,
+              runLog.id,
+              'agent_decision_move',
+              `Agent move decision: ${moveDecision.move}`,
+              { reason: moveDecision.reason }
+            );
+
+            move = moveDecision.move;
+            moves.push(move);
+            roomDecisionHistory.push({ kind: 'move', choice: move, reason: moveDecision.reason });
+          } catch (err) {
+            const message = `Agent move decision failed: ${formatErrorMessage(err)}`;
+            await this.databaseService.logEvent(
+              dungeonRunId,
+              runLog.id,
+              'agent_error',
+              message,
+              { phase: 'combat', error: formatErrorMessage(err) }
+            );
+            await this.databaseService.updateRunLog(runLog.id, { status: 'error', error_message: message });
+            await this.databaseService.failDungeonRun(dungeonRunId, message);
+            return false;
+          }
           
           const moveData = {
             consumables,
@@ -339,7 +457,7 @@ export class DungeonService {
           );
           
           await sleep(ACTION_DELAY_MS);
-          const moveResponse = await gameClient.makeMove(move, dungeonId, moveData);
+          const moveResponse = await gameClient.makeMove(move as any, dungeonId, moveData);
           
           if (!moveResponse.success) {
             throw new Error(`Combat move failed: ${moveResponse.message}`);

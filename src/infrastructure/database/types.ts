@@ -47,7 +47,10 @@ export type EventType =
   | 'room_cleared' 
   | 'run_completed'
   | 'all_runs_completed' 
-  | 'error';
+  | 'error'
+  | 'agent_decision_move'
+  | 'agent_decision_loot'
+  | 'agent_error';
 
 export interface RunEvent {
   id: string;

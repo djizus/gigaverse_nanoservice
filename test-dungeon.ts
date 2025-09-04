@@ -26,6 +26,17 @@ async function testDungeonEndpoint() {
     const healthResponse = await fetch(`${BASE_URL}/health`);
     const health = await healthResponse.json();
     console.log("✅ Health:", health);
+    const agentHealth = health?.daydreamsAgent || {};
+    console.log("🧠 Daydreams Agent:", agentHealth);
+    if (process.env.USE_DAYDREAMS_AGENT === 'true') {
+      if (!agentHealth.enabled) {
+        console.error("❌ Agent expected enabled but /health reports disabled. Check DREAMS_ROUTER_API_KEY and USE_DAYDREAMS_AGENT.");
+        process.exit(1);
+      }
+      console.log(`🔧 Agent Model: ${agentHealth.model} | Timeout: ${agentHealth.timeoutMs}ms`);
+    } else {
+      console.log("ℹ️  Agent is disabled by config (USE_DAYDREAMS_AGENT!=true)");
+    }
     console.log();
 
     // Service info (free)  
@@ -41,7 +52,7 @@ async function testDungeonEndpoint() {
     const dungeonRequest = {
       context: "Be aggressive in combat, prioritize attack upgrades when looting",
       playerAddress: account.address,
-      gigaverseToken: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhZGRyZXNzIjoiMHhFMENCRjVFZjJCOUU1MkE5Q2NDMDg0YTZBYjVlNDhFMEU5NTVDOWIxIiwiaWF0IjoxNzI1MjUzMzQ5LCJleHAiOjE3MjUzMzk3NDl9.example",
+      gigaverseToken: "eyJhbGciOiJIUzI1NiJ9.eyJhZGRyZXNzIjoiMHhFMENCRjVFZjJCOUU1MkE5Q2NDMDg0YTZBYjVlNDhFMEU5NTVDOWIxIiwidXNlciI6eyJsZWdhbENvbnNlbnREYXRhIjp7InRlcm1zQWNjZXB0ZWQiOnRydWUsInByaXZhY3lBY2NlcHRlZCI6dHJ1ZSwiaXBBZGRyZXNzIjoiOTIuMTg0LjExMC4xNTAiLCJ1c2VyQWdlbnQiOiJNb3ppbGxhLzUuMCAoV2luZG93cyBOVCAxMC4wOyBXaW42NDsgeDY0KSBBcHBsZVdlYktpdC81MzcuMzYgKEtIVE1MLCBsaWtlIEdlY2tvKSBDaHJvbWUvMTM5LjAuMC4wIFNhZmFyaS81MzcuMzYiLCJ0aW1lc3RhbXAiOiIyMDI1LTA4LTMxVDEyOjMxOjExLjYwMVoifSwiX2lkIjoiNjdhZGJiODVlMWVlNjQ0YjFkYjIxMDlhIiwid2FsbGV0QWRkcmVzcyI6IjB4ZTBjYmY1ZWYyYjllNTJhOWNjYzA4NGE2YWI1ZTQ4ZTBlOTU1YzliMSIsInVzZXJuYW1lIjoiMHhFMENCRjVFZjJCOUU1MkE5Q2NDMDg0YTZBYjVlNDhFMEU5NTVDOWIxIiwiY2FzZVNlbnNpdGl2ZUFkZHJlc3MiOiIweEUwQ0JGNUVmMkI5RTUyQTlDY0MwODRhNkFiNWU0OEUwRTk1NUM5YjEiLCJfX3YiOjAsImhhc0FjY2VwdGVkTGVnYWwiOnRydWUsImxlZ2FsQWNjZXB0ZWRBdCI6IjIwMjUtMDgtMzFUMTI6MzE6MTEuMjA1WiIsImxhc3RMb2dpbiI6IjIwMjUtMDktMDRUMjE6MTQ6MjYuMzczWiJ9LCJnYW1lQWNjb3VudCI6eyJub29iIjp7Il9pZCI6IjY3YWRiYjlhNmU4ZmE3N2FhOTBjYjkxMiIsImRvY0lkIjoiMTU5NCIsInRhYmxlTmFtZSI6IkdpZ2FOb29iTkZUIiwiSU5JVElBTElaRURfQ0lEIjp0cnVlLCJjcmVhdGVkQXQiOiIyMDI1LTAyLTEzVDA5OjMwOjAyLjM5MloiLCJ1cGRhdGVkQXQiOiIyMDI1LTAyLTEzVDA5OjMwOjAyLjgyMVoiLCJMQVNUX1RSQU5TRkVSX1RJTUVfQ0lEIjoxNzM5NDM4OTkzLCJJU19OT09CX0NJRCI6dHJ1ZSwiT1dORVJfQ0lEIjoiMHhlMGNiZjVlZjJiOWU1MmE5Y2NjMDg0YTZhYjVlNDhlMGU5NTVjOWIxIiwiTEVWRUxfQ0lEIjoxfSwiYWxsb3dlZFRvQ3JlYXRlQWNjb3VudCI6dHJ1ZSwiY2FuRW50ZXJHYW1lIjp0cnVlLCJub29iUGFzc0JhbGFuY2UiOjAsImxhc3ROb29iSWQiOjc3MjQ2LCJtYXhOb29iSWQiOjEwMDAwLCJoYXNBY2NlcHRlZExlZ2FsIjp0cnVlLCJsZWdhbEFjY2VwdGVkQXQiOiIyMDI1LTA4LTMxVDEyOjMxOjExLjIwNVoifSwiZXhwIjoxNzU3MTA2ODY2fQ.zHQ3w5Vf-XQnxhjkZ99QAWzDdSjkj1JyPUmiyGsOQ1c",
       totalRuns: process.argv.includes('--duplicate') ? 1 : 2,
       dungeonId: 1,
       isJuiced: false,
@@ -84,7 +95,14 @@ async function testDungeonEndpoint() {
       console.log("🔔 Real-time Updates:");
       console.log("   Subscribe to Supabase table 'run_events'");
       console.log(`   Filter: dungeon_run_id=eq.${result.runId}`);
-      console.log("   Events: run_started, combat_move, room_cleared, run_completed");
+      console.log("   Events:");
+      console.log("    - run_started, room_entered, combat_move, battle_result");
+      console.log("    - loot_phase, loot_selected, room_cleared, run_completed, all_runs_completed");
+      console.log("    - agent_decision_move, agent_decision_loot, agent_error, error");
+      console.log();
+      console.log("🔎 Expectation:");
+      console.log("   - When agent is enabled, each move/loot should be preceded by agent_decision_* with a short reason.");
+      console.log("   - On any agent failure or timeout, agent_error will be logged and the run will fail (no fallback).");
     }
 
   } catch (error) {

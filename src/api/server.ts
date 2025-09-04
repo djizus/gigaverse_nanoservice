@@ -6,6 +6,8 @@ import { DungeonService } from "../domains/dungeon/dungeon.service";
 import { DungeonController } from "../domains/dungeon/dungeon.controller";
 import { createGameRoutes } from "./routes/game.routes";
 import { createHealthRoutes } from "./routes/health.routes";
+import { DaydreamsAgentService } from "../infrastructure/ai/daydreams.agent";
+import { aiConfig } from "../infrastructure/config/ai.config";
 
 // Bootstrap application
 async function bootstrap() {
@@ -20,8 +22,16 @@ async function bootstrap() {
     // Initialize database service
     const databaseService = new DatabaseService(supabaseConfig);
     
-    // Initialize dungeon service with database dependency
-    const dungeonService = new DungeonService(databaseService);
+    // Initialize optional Daydreams agent
+    const daydreamsAgent = new DaydreamsAgentService();
+    if (aiConfig.enabled) {
+      console.log(`🧠 Daydreams Agent enabled (model: ${aiConfig.model})`);
+    } else {
+      console.log(`🧠 Daydreams Agent disabled`);
+    }
+
+    // Initialize dungeon service with database dependency and agent
+    const dungeonService = new DungeonService(databaseService, daydreamsAgent);
     await dungeonService.initialize();
     
     // Initialize controllers

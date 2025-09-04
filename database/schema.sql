@@ -58,6 +58,26 @@ CREATE TABLE IF NOT EXISTS run_events (
   timestamp TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+-- Ensure event_type uses the allowed set, including agent-specific events
+ALTER TABLE run_events DROP CONSTRAINT IF EXISTS run_events_event_type_check;
+ALTER TABLE run_events ADD CONSTRAINT run_events_event_type_check CHECK (
+  event_type IN (
+    'run_started',
+    'room_entered',
+    'combat_move',
+    'battle_result',
+    'loot_phase',
+    'loot_selected',
+    'room_cleared',
+    'run_completed',
+    'all_runs_completed',
+    'error',
+    'agent_decision_move',
+    'agent_decision_loot',
+    'agent_error'
+  )
+);
+
 -- Indexes for performance
 CREATE INDEX IF NOT EXISTS idx_dungeon_runs_player_status ON dungeon_runs(player_address, status);
 CREATE INDEX IF NOT EXISTS idx_dungeon_runs_created_at ON dungeon_runs(created_at);
