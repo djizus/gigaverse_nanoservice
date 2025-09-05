@@ -1,0 +1,208 @@
+import { Hono } from 'hono';
+import { streamSSE } from 'hono/streaming';
+import { DaydreamsAgentService } from '../../infrastructure/ai/daydreams.agent';
+import { AgentService } from '../services/agent.service';
+import { ContextRegistryService } from '../services/context-registry.service';
+import { CreateAgentInput } from '../types/agent';
+
+export interface DaydreamsDeps {
+  agentService: AgentService;
+  contextRegistry: ContextRegistryService;
+  daydreamsLLM: DaydreamsAgentService;
+}
+
+export const createDaydreamsRoutes = (deps: DaydreamsDeps) => {
+  const app = new Hono();
+
+  // Contexts
+  app.get('/daydreams/contexts', (c) => {
+    try {
+      return c.json(deps.contextRegistry.list());
+    } catch (err: any) {
+      console.error('[Daydreams] contexts error:', err);
+      return c.json({ error: err?.message || 'Failed to list contexts' }, 500);
+    }
+  });
+
+  // Agents CRUD
+  app.get('/daydreams/agents', async (c) => {
+    try {
+      const agents = await deps.agentService.listAgents();
+      return c.json(agents);
+    } catch (err: any) {
+      console.error('[Daydreams] list agents error:', err);
+      return c.json({ error: err?.message || 'Failed to list agents' }, 500);
+    }
+  });
+
+  app.post('/daydreams/agents', async (c) => {
+    try {
+      const body = await c.req.json();
+      const input = body as CreateAgentInput;
+
+      // Minimal validation
+      if (!input?.name || !input?.model || !input?.context) {
+        return c.json({ error: 'name, model and context are required' }, 400);
+      }
+
+      const agent = await deps.agentService.createAgent({
+        name: input.name,
+        model: input.model,
+        context: input.context,
+        description: input.description,
+        instructions: input.instructions,
+        status: input.status ?? 'active',
+        routerApiKey: (input as any).routerApiKey,
+        templateId: input.templateId,
+        modelType: input.modelType,
+        modelId: input.modelId,
+        contexts: input.contexts,
+        contextArgs: input.contextArgs,
+        mcpConfig: input.mcpConfig,
+      });
+
+      return c.json(agent, 201);
+    } catch (err: any) {
+      console.error('[Daydreams] create agent error:', err);
+      return c.json({ error: err?.message || 'Failed to create agent' }, 500);
+    }
+  });
+
+  app.get('/daydreams/agents/:id', async (c) => {
+    try {
+      const id = c.req.param('id');
+      const agent = await deps.agentService.getAgent(id);
+      if (!agent) return c.json({ error: 'Agent not found' }, 404);
+      return c.json(agent);
+    } catch (err: any) {
+      console.error('[Daydreams] get agent error:', err);
+      return c.json({ error: err?.message || 'Failed to get agent' }, 500);
+    }
+  });
+
+  app.delete('/daydreams/agents/:id', async (c) => {
+    try {
+      const id = c.req.param('id');
+      const ok = await deps.agentService.deleteAgent(id);
+      if (!ok) return c.json({ error: 'Agent not found' }, 404);
+      return c.json({ success: true });
+    } catch (err: any) {
+      console.error('[Daydreams] delete agent error:', err);
+      return c.json({ error: err?.message || 'Failed to delete agent' }, 500);
+    }
+  });
+
+  // Send message to agent (creates session if not provided)
+  app.post('/daydreams/agents/:id/send', async (c) => {
+    try {
+      const id = c.req.param('id');
+      console.log(`[Daydreams][HTTP] POST /daydreams/agents/${id}/send`);
+      const agent = await deps.agentService.getAgent(id);
+      if (!agent) return c.json({ error: 'Agent not found' }, 404);
+
+      const body = await c.req.json();
+      const { message, sessionId } = body as { message?: string; sessionId?: string };
+      if (!message) return c.json({ error: 'message is required' }, 400);
+      console.log(`[Daydreams][HTTP] send body sessionId=${sessionId ?? 'new'} messageLen=${message.length}`);
+
+      const session = await deps.agentService.ensureSession(agent.id, sessionId);
+      console.log(`[Daydreams][HTTP] ensured session id=${session.id}`);
+      const { reply, user } = await deps.agentService.sendMessage(agent, session, message);
+      console.log(`[Daydreams][HTTP] persisted user=${user.id} assistant=${reply.id}`);
+
+      return c.json({ sessionId: session.id, user, reply });
+    } catch (err: any) {
+      console.error('[Daydreams] send message error:', err);
+      return c.json({ error: err?.message || 'Failed to send message' }, 500);
+    }
+  });
+
+  // Streaming reply (SSE) — PoC
+  app.post('/daydreams/agents/:id/send/stream', async (c) => {
+    try {
+      const id = c.req.param('id');
+      console.log(`[Daydreams][HTTP] POST /daydreams/agents/${id}/send/stream`);
+      const agent = await deps.agentService.getAgent(id);
+      if (!agent) return c.json({ error: 'Agent not found' }, 404);
+
+      const body = await c.req.json();
+      const { message, sessionId } = body as { message?: string; sessionId?: string };
+      if (!message) return c.json({ error: 'message is required' }, 400);
+      // Runtime-only prechecks
+      if (!deps.daydreamsLLM.isEnabled) {
+        return c.json({ error: 'PaymentRequired', message: 'Daydreams Router not initialized (payment auth required)' }, 402);
+      }
+      if (!deps.daydreamsLLM.hasRuntime(agent.id)) {
+        try { deps.daydreamsLLM.registerAgent({ id: agent.id, model: agent.model, name: agent.name, context: agent.context, instructions: agent.instructions }); } catch {}
+        if (!deps.daydreamsLLM.hasRuntime(agent.id)) {
+          return c.json({ error: 'RuntimeNotFound', message: `Runtime not registered for agent ${agent.id}` }, 404);
+        }
+      }
+
+
+      const session = await deps.agentService.ensureSession(agent.id, sessionId);
+      await deps.agentService.addUserMessage(agent.id, session.id, message);
+
+      return streamSSE(c, async (sse) => {
+        await sse.writeSSE({ event: 'start', data: JSON.stringify({ sessionId: session.id }) });
+
+        try {
+          const textStream = await deps.daydreamsLLM.stream(agent.id, message, { temperature: 0.2 });
+          let finalText = '';
+          for await (const delta of textStream) {
+            finalText += delta;
+            await sse.writeSSE({ data: JSON.stringify({ delta }) });
+          }
+          await deps.agentService.addAssistantMessage(agent.id, session.id, finalText);
+        } catch (llmErr: any) {
+          console.error('[Daydreams][HTTP] LLM stream error:', llmErr?.message || llmErr);
+          try {
+            console.error('[Daydreams][HTTP] LLM error details', {
+              name: llmErr?.name,
+              url: llmErr?.url,
+              statusCode: llmErr?.statusCode,
+              requestBodyValues: llmErr?.requestBodyValues,
+              responseBody: llmErr?.responseBody,
+              responseHeaders: llmErr?.responseHeaders,
+            });
+          } catch {}
+          if (llmErr?.stack) console.error(llmErr.stack);
+          await sse.writeSSE({ event: 'error', data: JSON.stringify({ error: llmErr?.code || 'StreamError', message: llmErr?.message || 'LLM stream failed' }) });
+        }
+
+        await sse.writeSSE({ event: 'done', data: '{}' });
+      });
+    } catch (err: any) {
+      console.error('[Daydreams] send message stream error:', err);
+      return c.json({ error: err?.message || 'Failed to stream message' }, 500);
+    }
+  });
+
+  // List sessions for agent
+  app.get('/daydreams/agents/:id/sessions', async (c) => {
+    try {
+      const id = c.req.param('id');
+      const agent = await deps.agentService.getAgent(id);
+      if (!agent) return c.json({ error: 'Agent not found' }, 404);
+      const sessions = await deps.agentService.listAgentSessions(agent.id);
+      return c.json(sessions);
+    } catch (err: any) {
+      console.error('[Daydreams] list sessions error:', err);
+      return c.json({ error: err?.message || 'Failed to list sessions' }, 500);
+    }
+  });
+
+  // List messages for a session
+  app.get('/daydreams/sessions/:sessionId/messages', async (c) => {
+    try {
+      const sessionId = c.req.param('sessionId');
+      const messages = await deps.agentService.listMessages(sessionId);
+      return c.json(messages);
+    } catch (err: any) {
+      console.error('[Daydreams] list messages error:', err);
+      return c.json({ error: err?.message || 'Failed to list messages' }, 500);
+    }
+  });
+
+  return app;
+};

@@ -116,6 +116,42 @@ bun run client:examples
 bun run test:deployed
 ```
 
+### Daydreams (Agents) PoC
+
+- `GET /daydreams/contexts` — List available contexts (`chat`, `gigaverse`)
+- `GET /daydreams/agents` — List agents
+- `POST /daydreams/agents` — Create agent
+- `GET /daydreams/agents/:id` — Get agent
+- `DELETE /daydreams/agents/:id` — Delete agent
+- `POST /daydreams/agents/:id/send` — Send a message (creates session if missing)
+- `GET /daydreams/agents/:id/sessions` — List sessions for an agent
+- `GET /daydreams/sessions/:sessionId/messages` — List messages in a session
+
+Request example for creating an agent:
+
+```json
+{
+  "name": "My Agent",
+  "model": "gpt-4o-mini",
+  "context": "gigaverse",
+  "instructions": "Be helpful"
+}
+```
+
+Request example for sending a message:
+
+```json
+{
+  "message": "Hello",
+  "sessionId": "optional-existing-session-id"
+}
+```
+
+Notes:
+- PoC responses are stubbed without calling external LLMs. Persistence is backed by Supabase in production and falls back to in-memory when `DAYDREAMS_USE_MEMORY=true` (useful for tests/dev without DB).
+- Database schema for agents is in `database/daydreams.schema.sql`.
+
+
 ### Real-time Event Subscription
 
 After starting a dungeon run, subscribe to live updates using the returned `runId`:

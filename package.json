@@ -7,8 +7,12 @@
   "scripts": {
     "dev": "bun run server.ts",
     "start": "bun run server.ts",
+    "test": "bun test tests/daydreams.poc.test.ts",
     "client": "bun run test-dungeon.ts",
     "client:examples": "bun run test-dungeon.ts --duplicate",
+    "web": "bun --cwd front/daydreams-ui run dev",
+    "web:build": "bun --cwd front/daydreams-ui run build",
+    "web:preview": "bun --cwd front/daydreams-ui run preview",
     "deploy": "./deploy.sh",
     "deploy:prod": "GCP_PROJECT_ID=your-prod-project ./deploy.sh",
     "test:deployed": "curl https://ai-assistant.agent.daydreams.systems/health"
