@@ -92,7 +92,12 @@ export class AgentService {
   }
 
   // Messaging: runtime-only (no fallback)
-  async sendMessage(agent: AgentConfig, session: Session, content: string): Promise<{ reply: Message; user: Message; }>{
+  async sendMessage(
+    agent: AgentConfig,
+    session: Session,
+    content: string,
+    opts?: { context?: any; args?: any }
+  ): Promise<{ reply: Message; user: Message; }>{
     try {
       console.log(`[Daydreams][AgentService.sendMessage] agent=${agent.id} session=${session.id} contentLen=${content?.length ?? 0} content=${JSON.stringify(content)}`);
       // Store user message
@@ -107,7 +112,11 @@ export class AgentService {
       if (this.llm && !this.llm.hasRuntime(agent.id)) {
         this.llm.registerAgent({ id: agent.id, model: agent.model, name: agent.name, context: agent.context, instructions: agent.instructions });
       }
-      const assistantText = await this.llm!.send(agent.id, content, { temperature: 0.2 });
+      const assistantText = await this.llm!.send(
+        agent.id,
+        { input: content, context: opts?.context, args: opts?.args },
+        { temperature: 0.2 }
+      );
 
       const reply = await this.storage.addMessage({
         agentId: agent.id,

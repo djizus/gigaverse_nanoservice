@@ -101,13 +101,13 @@ export const createDaydreamsRoutes = (deps: DaydreamsDeps) => {
       if (!agent) return c.json({ error: 'Agent not found' }, 404);
 
       const body = await c.req.json();
-      const { message, sessionId } = body as { message?: string; sessionId?: string };
+      const { message, sessionId, context, args } = body as { message?: string; sessionId?: string; context?: any; args?: any };
       if (!message) return c.json({ error: 'message is required' }, 400);
       console.log(`[Daydreams][HTTP] send body sessionId=${sessionId ?? 'new'} messageLen=${message.length}`);
 
       const session = await deps.agentService.ensureSession(agent.id, sessionId);
       console.log(`[Daydreams][HTTP] ensured session id=${session.id}`);
-      const { reply, user } = await deps.agentService.sendMessage(agent, session, message);
+      const { reply, user } = await deps.agentService.sendMessage(agent, session, message, { context, args });
       console.log(`[Daydreams][HTTP] persisted user=${user.id} assistant=${reply.id}`);
 
       return c.json({ sessionId: session.id, user, reply });
@@ -126,7 +126,7 @@ export const createDaydreamsRoutes = (deps: DaydreamsDeps) => {
       if (!agent) return c.json({ error: 'Agent not found' }, 404);
 
       const body = await c.req.json();
-      const { message, sessionId } = body as { message?: string; sessionId?: string };
+      const { message, sessionId, context, args } = body as { message?: string; sessionId?: string; context?: any; args?: any };
       if (!message) return c.json({ error: 'message is required' }, 400);
       // Runtime-only prechecks
       if (!deps.daydreamsLLM.isEnabled) {
@@ -147,7 +147,7 @@ export const createDaydreamsRoutes = (deps: DaydreamsDeps) => {
         await sse.writeSSE({ event: 'start', data: JSON.stringify({ sessionId: session.id }) });
 
         try {
-          const textStream = await deps.daydreamsLLM.stream(agent.id, message, { temperature: 0.2 });
+          const textStream = await deps.daydreamsLLM.stream(agent.id, { input: message, context, args }, { temperature: 0.2 });
           let finalText = '';
           for await (const delta of textStream) {
             finalText += delta;

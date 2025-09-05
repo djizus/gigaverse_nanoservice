@@ -1,9 +1,15 @@
 import { z } from 'zod';
 import { generateObject, generateText, streamText } from 'ai';
-import { createDreamsRouter, createDreamsRouterAuth } from '@daydreamsai/ai-sdk-provider';
+import { createDreamsRouter } from '@daydreamsai/ai-sdk-provider';
 import { aiConfig } from '../config/ai.config';
 import type { AgentConfig } from '../../daydreams/types/agent';
-import { privateKeyToAccount } from 'viem/accounts';
+import {
+  createDreams,
+  LogLevel,
+  Agent,
+  AnyContext,
+  BaseMemory,
+} from '@daydreamsai/core';
 
 type MoveName = 'rock' | 'paper' | 'scissor';
 type LootChoice = 'loot_one' | 'loot_two' | 'loot_three' | 'loot_four';
@@ -37,55 +43,26 @@ export interface LootInput {
   roomDecisionHistory: RoomDecisionHistoryItem[];
 }
 
-// Minimal runtime wrapper around the provider for a DB-backed agent
-class AgentRuntime {
-  constructor(
-    private getModel: (id: string) => any,
-    private modelId: string,
-    private system: string,
-  ) {}
-
-  async send(req: { input: string; temperature?: number; signal?: AbortSignal }) {
-    const { text } = await generateText({
-      model: this.getModel(this.modelId),
-      system: this.system,
-      prompt: req.input,
-      temperature: req.temperature ?? 0.2,
-    });
-    return text;
-  }
-
-  async stream(req: { input: string; temperature?: number; signal?: AbortSignal }): Promise<AsyncIterable<string>> {
-    const result = await streamText({
-      model: this.getModel(this.modelId),
-      system: this.system,
-      prompt: req.input,
-      temperature: req.temperature ?? 0.2,
-    });
-    return result.textStream;
-  }
-}
-
 export class DaydreamsAgentService {
   private modelProvider: ReturnType<typeof createDreamsRouter> | null = null;
-  private runtimes: Map<string, AgentRuntime> = new Map();
+  private runtimes: Map<string, Agent> = new Map();
   private agents: Map<string, AgentConfig> = new Map();
 
   constructor() {}
 
   async initialize(): Promise<void> {
     if (!aiConfig.enabled) return;
-    const pk = (process.env.PRIVATE_KEY || '').trim();
-    const amount = process.env.AI_PAYMENT_AMOUNT || '100000';
-    const network = process.env.NETWORK || 'base-sepolia';
-    if (pk) {
+    if (aiConfig.apiKey) {
       try {
-        const account = privateKeyToAccount(pk as `0x${string}`);
-        const { dreamsRouter } = await createDreamsRouterAuth(account, { payments: { amount, network } });
-        this.modelProvider = dreamsRouter as any;
+        this.modelProvider = createDreamsRouter({ apiKey: aiConfig.apiKey });
+        console.log('[DaydreamsAgentService] Initialized Daydreams router with API key');
       } catch (err) {
-        console.warn('[DaydreamsAgentService] Payment-auth router init failed, keeping existing router:', err);
+        console.warn('[DaydreamsAgentService] Failed to initialize router with API key:', err);
+        this.modelProvider = null;
       }
+    } else {
+      console.warn('[DaydreamsAgentService] No DREAMS_ROUTER_API_KEY provided; router not initialized');
+      this.modelProvider = null;
     }
   }
 
@@ -141,7 +118,11 @@ export class DaydreamsAgentService {
     }
     const rt = this.runtimes.get(agent.id as string);
     if (rt) {
-      const textStream = await rt.stream({ input: opts.prompt, temperature: opts.temperature, signal: opts.signal });
+      const textStream = await this.stream(
+        agent.id,
+        { input: opts.prompt },
+        { temperature: opts.temperature, signal: opts.signal }
+      );
       return { textStream };
     }
     const system = opts.system || agent.instructions || `You are ${agent.name}, a helpful assistant for context '${agent.context}'.`;
@@ -174,7 +155,16 @@ export class DaydreamsAgentService {
     if (agent.model && agent.model !== modelId) {
       console.warn(`[DaydreamsAgentService] registerAgent: overriding agent.model='${agent.model}' -> '${modelId}'`);
     }
-    const runtime = new AgentRuntime(this.modelProvider, modelId, system);
+
+    const runtime = createDreams({
+      model: this.modelProvider(modelId),
+      // Minimal runtime for now; contexts/memory/actions can be wired later
+      contexts: [],
+      inputs: {},
+      outputs: {},
+      extensions: [],
+      logLevel: LogLevel.INFO,
+    });
     this.runtimes.set(agent.id, runtime);
     // Track the agent metadata in the registry as well
     this.agents.set(agent.id, {
@@ -198,38 +188,115 @@ export class DaydreamsAgentService {
     return this.runtimes.has(agentId);
   }
 
-  getRuntime(agentId: string): AgentRuntime | undefined {
+  getRuntime(agentId: string): any | undefined {
     return this.runtimes.get(agentId);
   }
 
   // Runtime-only helpers (throws if runtime missing)
-  async send(agentId: string, input: string, opts?: { temperature?: number; signal?: AbortSignal }) {
-    const rt = this.getRuntime(agentId);
+  async send(
+    agentId: string,
+    request: { input: string; context?: any; args?: any },
+    opts?: { temperature?: number; signal?: AbortSignal }
+  ) {
+    const rt: any = this.getRuntime(agentId);
     if (!rt) {
       const err: any = new Error(`Runtime not registered for agent ${agentId}`);
       err.statusCode = 404;
       err.code = 'RuntimeNotFound';
       throw err;
     }
-    return rt.send({ input, temperature: opts?.temperature, signal: opts?.signal });
+    if (typeof rt.send === 'function') {
+      const res: any = await rt.send({
+        context: request.context,
+        args: request.args,
+        input: request.input,
+        temperature: opts?.temperature,
+        signal: opts?.signal,
+      });
+      if (typeof res === 'string') return res;
+      if (res?.reply) return String(res.reply);
+      if (res?.message) return String(res.message);
+      return typeof res?.content === 'string' ? res.content : JSON.stringify(res);
+    }
+    if (!this.modelProvider) {
+      const err: any = new Error('Router not initialized');
+      err.statusCode = 402;
+      err.code = 'PaymentRequired';
+      throw err;
+    }
+    const agent = this.agents.get(agentId);
+    const system = agent?.instructions || '';
+    const composed = [
+      request.context ? `Context: ${JSON.stringify(request.context)}` : '',
+      request.args ? `Args: ${JSON.stringify(request.args)}` : '',
+      `Input: ${request.input}`,
+    ].filter(Boolean).join('\n');
+    const { text } = await generateText({
+      model: this.modelProvider(aiConfig.model),
+      system,
+      prompt: composed,
+      temperature: opts?.temperature ?? 0.2,
+      signal: opts?.signal,
+    });
+    return text;
   }
 
-  async stream(agentId: string, input: string, opts?: { temperature?: number; signal?: AbortSignal }): Promise<AsyncIterable<string>> {
-    const rt = this.getRuntime(agentId);
+  async stream(
+    agentId: string,
+    request: { input: string; context?: any; args?: any },
+    opts?: { temperature?: number; signal?: AbortSignal }
+  ): Promise<AsyncIterable<string>> {
+    const rt: any = this.getRuntime(agentId);
     if (!rt) {
       const err: any = new Error(`Runtime not registered for agent ${agentId}`);
       err.statusCode = 404;
       err.code = 'RuntimeNotFound';
       throw err;
     }
-    return rt.stream({ input, temperature: opts?.temperature, signal: opts?.signal });
+    if (typeof rt.stream === 'function') {
+      return rt.stream({
+        context: request.context,
+        args: request.args,
+        input: request.input,
+        temperature: opts?.temperature,
+        signal: opts?.signal,
+      });
+    }
+    if (!this.modelProvider) {
+      const err: any = new Error('Router not initialized');
+      err.statusCode = 402;
+      err.code = 'PaymentRequired';
+      throw err;
+    }
+    const agent = this.agents.get(agentId);
+    const system = agent?.instructions || '';
+    const composed = [
+      request.context ? `Context: ${JSON.stringify(request.context)}` : '',
+      request.args ? `Args: ${JSON.stringify(request.args)}` : '',
+      `Input: ${request.input}`,
+    ].filter(Boolean).join('\n');
+    const result = await streamText({
+      model: this.modelProvider(aiConfig.model),
+      system,
+      prompt: composed,
+      temperature: opts?.temperature ?? 0.2,
+      signal: opts?.signal,
+    });
+    return result.textStream;
   }
 
   // Register runtime using per-agent API key (does not rely on global provider)
   registerAgentWithApiKey(agent: Pick<AgentConfig, 'id' | 'name' | 'context' | 'instructions'>, apiKey: string) {
     const system = agent.instructions || `You are ${agent.name}, a helpful assistant for context '${agent.context}'.`;
     const provider = createDreamsRouter({ apiKey });
-    const runtime = new AgentRuntime(provider, aiConfig.model, system);
+    const runtime = createDreams({
+      model: provider(aiConfig.model),
+      contexts: [],
+      inputs: {},
+      outputs: {},
+      extensions: [],
+      logLevel: LogLevel.INFO,
+    });
     this.runtimes.set(agent.id, runtime);
     this.agents.set(agent.id, {
       id: agent.id,
