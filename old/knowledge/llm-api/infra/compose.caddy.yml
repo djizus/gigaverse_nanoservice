@@ -1,0 +1,41 @@
+# Caddy reverse proxy for HTTPS termination
+# Separate from app containers to avoid conflicts
+services:
+  caddy:
+    image: caddy:2-alpine
+    container_name: caddy-proxy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"  # For HTTP/3
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks:
+      - caddy-network
+    environment:
+      - DOMAIN=${DOMAIN:-example.com}
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:2019/reverse_proxy/upstreams"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    labels:
+      - "com.docker.compose.project=caddy"
+      - "environment=proxy"
+
+networks:
+  caddy-network:
+    name: caddy-network
+    driver: bridge
+    external: false  # Will be created automatically if not exists
+
+volumes:
+  caddy-data:
+    driver: local
+    name: caddy-data
+  caddy-config:
+    driver: local
+    name: caddy-config

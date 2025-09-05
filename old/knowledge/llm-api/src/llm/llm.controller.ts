@@ -1,0 +1,72 @@
+import { Controller, Post, Body } from '@nestjs/common';
+import { DaydreamsService } from '../daydreams/daydreams.service';
+import { chatContext } from '../daydreams/context/chat.context';
+
+interface ChatRequest {
+  sessionId: string;
+  message?: string;
+  prompt?: string;
+}
+
+@Controller('llm')
+export class LlmController {
+  constructor(private readonly daydreamsService: DaydreamsService) {}
+
+  @Post('chat')
+  async chat(
+    @Body() { sessionId, prompt }: { sessionId: string; prompt: string },
+  ) {
+    console.log('[DEBUG] Processing chat request:', { sessionId, prompt });
+
+    // Get the first available agent ID or default to first in the list
+    const agentIds = this.daydreamsService.getAgentIds();
+    const agentId = agentIds.length > 0 ? agentIds[0] : 'default';
+
+    const response = await this.daydreamsService.send(agentId, {
+      context: chatContext,
+      args: { sessionId },
+      input: {
+        type: 'chat',
+        data: { sessionId, prompt },
+      },
+    });
+
+    return { response };
+  }
+
+  @Post()
+  async sendMessage(@Body() data: ChatRequest) {
+    console.log('[DEBUG] Processing message request:', data);
+
+    try {
+      // Validate request data
+      if (!data.sessionId) {
+        console.log('[DEBUG] No sessionId provided, using default');
+        data.sessionId = 'default';
+      }
+
+      // Get the first available agent ID or default to first in the list
+      const agentIds = this.daydreamsService.getAgentIds();
+      const agentId = agentIds.length > 0 ? agentIds[0] : 'default';
+
+      const response = await this.daydreamsService.send(agentId, {
+        context: chatContext,
+        args: { sessionId: data.sessionId },
+        input: {
+          type: 'chat',
+          data: {
+            sessionId: data.sessionId,
+            prompt: data.message || 'Empty message',
+          },
+        },
+      });
+
+      return response;
+    } catch (error: unknown) {
+      console.error('[ERROR] Error processing message:', error);
+      throw new Error(
+        `Processing error: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      );
+    }
+  }
+}

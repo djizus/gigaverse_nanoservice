@@ -1,0 +1,301 @@
+name: Deploy LLM-API
+
+on:
+  push:
+    branches: [main, staging]
+    paths:
+      - 'llm-api/**'
+      - '.github/workflows/deploy.yml'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+          - staging
+          - production
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Determine environment
+        id: env
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "environment=${{ github.event.inputs.environment }}" >> $GITHUB_OUTPUT
+          elif [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+            echo "environment=production" >> $GITHUB_OUTPUT
+          elif [[ "${{ github.ref }}" == "refs/heads/staging" ]]; then
+            echo "environment=staging" >> $GITHUB_OUTPUT
+          else
+            echo "environment=staging" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./llm-api
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}:${{ github.sha }}
+            ghcr.io/${{ github.repository }}:${{ steps.env.outputs.environment }}-latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy-staging:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    if: (github.ref == 'refs/heads/staging' || (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'staging'))
+    environment: staging
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy to Staging VPS
+        uses: appleboy/ssh-action@v1.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_ACTOR: ${{ github.actor }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        with:
+          host: ${{ secrets.VPS_IP }}
+          username: ${{ secrets.VPS_USERNAME }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          envs: GITHUB_TOKEN,GITHUB_ACTOR,GITHUB_REPOSITORY
+          script: |
+            # Navigate to project directory
+            mkdir -p ${{ secrets.PROJECT_PATH || '/home/knowledge' }}
+            cd ${{ secrets.PROJECT_PATH || '/home/knowledge' }}
+
+            # Update repository with authentication
+            if [ ! -d ".git" ]; then
+              git clone https://${GITHUB_ACTOR}:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git .
+              git checkout staging || git checkout -b staging origin/staging || git checkout main
+            else
+              git remote set-url origin https://${GITHUB_ACTOR}:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git
+              git fetch origin
+              git checkout staging || git checkout -b staging origin/staging || git checkout main
+              git pull origin staging || git pull origin main
+            fi
+
+            # Create staging environment file in llm-api directory
+            cat > llm-api/.env.staging << EOF
+            ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}
+            OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
+            NOTION_API_KEY=${{ secrets.NOTION_API_KEY }}
+            DISCORD_TOKEN=${{ secrets.DISCORD_TOKEN }}
+            DISCORD_BOT_NAME=${{ secrets.DISCORD_BOT_NAME }}
+            SUPABASE_URL=${{ secrets.SUPABASE_URL }}
+            SUPABASE_API_KEY=${{ secrets.SUPABASE_API_KEY }}
+            SUPABASE_JWT_SECRET=${{ secrets.SUPABASE_JWT_SECRET }}
+            SUPABASE_SERVICE_KEY=${{ secrets.SUPABASE_SERVICE_KEY }}
+            MEMORY_TYPE=${{ secrets.MEMORY_TYPE || 'supabase' }}
+            USE_CHROMA=${{ secrets.USE_CHROMA || 'false' }}
+            PORT=3000
+            NODE_ENV=staging
+            EOF
+
+            # Login to GitHub Container Registry
+            echo "${GITHUB_TOKEN}" | docker login ghcr.io -u ${GITHUB_ACTOR} --password-stdin
+
+            # GitHub repository is already in environment
+
+            # Navigate to llm-api directory for docker operations
+            cd llm-api
+
+            # Pull latest staging image
+            docker pull ghcr.io/${GITHUB_REPOSITORY}:staging-latest || echo "Image not found, will build locally"
+
+            # If image doesn't exist, build it locally
+            if ! docker image inspect ghcr.io/${GITHUB_REPOSITORY}:staging-latest >/dev/null 2>&1; then
+              docker build -t ghcr.io/${GITHUB_REPOSITORY}:staging-latest .
+            fi
+
+            # Restart only staging containers without affecting production
+            docker compose -f infra/compose.staging.yml up -d --force-recreate --no-deps llm-api-staging
+
+            # Clean up unused images
+            docker image prune -f
+
+            # Verify deployment with better error handling
+            echo "Waiting for staging API to be ready..."
+            sleep 20
+            
+            # Show container status
+            docker compose -f infra/compose.staging.yml ps
+            
+            # Check if container is running
+            if ! docker ps | grep llm-api-staging; then
+              echo "❌ Container llm-api-staging is not running!"
+              docker logs llm-api-staging --tail 50
+              exit 1
+            fi
+            
+            # Test health endpoint with retry
+            for i in {1..6}; do
+              if curl -f http://localhost:3001/health; then
+                echo "✅ Staging API is healthy!"
+                break
+              fi
+              echo "Attempt $i/6: Waiting 10 more seconds..."
+              sleep 10
+              if [ $i -eq 6 ]; then
+                echo "❌ Health check failed after 60 seconds"
+                docker logs llm-api-staging --tail 30
+                exit 1
+              fi
+            done
+
+  deploy-production:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    if: (github.ref == 'refs/heads/main' || (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'production'))
+    environment: production
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy to Production VPS
+        uses: appleboy/ssh-action@v1.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_ACTOR: ${{ github.actor }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        with:
+          host: ${{ secrets.VPS_IP }}
+          username: ${{ secrets.VPS_USERNAME }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          envs: GITHUB_TOKEN,GITHUB_ACTOR,GITHUB_REPOSITORY
+          script: |
+            # Navigate to project directory
+            mkdir -p ${{ secrets.PROJECT_PATH || '/home/knowledge' }}
+            cd ${{ secrets.PROJECT_PATH || '/home/knowledge' }}
+
+            # Update repository with authentication
+            if [ ! -d ".git" ]; then
+              git clone https://${GITHUB_ACTOR}:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git .
+              git checkout main
+            else
+              git remote set-url origin https://${GITHUB_ACTOR}:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git
+              git fetch origin
+              git checkout main
+              git reset --hard origin/main
+            fi
+
+            # Create production environment file in llm-api directory
+            cat > llm-api/.env.prod << EOF
+            ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}
+            OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
+            NOTION_API_KEY=${{ secrets.NOTION_API_KEY }}
+            DISCORD_TOKEN=${{ secrets.DISCORD_TOKEN }}
+            DISCORD_BOT_NAME=${{ secrets.DISCORD_BOT_NAME }}
+            SUPABASE_URL=${{ secrets.SUPABASE_URL }}
+            SUPABASE_API_KEY=${{ secrets.SUPABASE_API_KEY }}
+            SUPABASE_JWT_SECRET=${{ secrets.SUPABASE_JWT_SECRET }}
+            SUPABASE_SERVICE_KEY=${{ secrets.SUPABASE_SERVICE_KEY }}
+            MEMORY_TYPE=${{ secrets.MEMORY_TYPE || 'supabase' }}
+            USE_CHROMA=${{ secrets.USE_CHROMA || 'false' }}
+            PORT=3000
+            NODE_ENV=production
+            EOF
+
+            # Login to GitHub Container Registry
+            echo "${GITHUB_TOKEN}" | docker login ghcr.io -u ${GITHUB_ACTOR} --password-stdin
+
+            # GitHub repository is already in environment
+
+            # Navigate to llm-api directory for docker operations
+            cd llm-api
+
+            # Pull latest production image
+            docker pull ghcr.io/${GITHUB_REPOSITORY}:production-latest || echo "Image not found, will build locally"
+
+            # If image doesn't exist, build it locally
+            if ! docker image inspect ghcr.io/${GITHUB_REPOSITORY}:production-latest >/dev/null 2>&1; then
+              docker build -t ghcr.io/${GITHUB_REPOSITORY}:production-latest .
+            fi
+
+            # Restart only production containers without affecting staging
+            docker compose -f infra/compose.prod.yml up -d --force-recreate --no-deps llm-api-prod
+
+            # Clean up unused images
+            docker image prune -f
+
+            # Verify deployment with better error handling
+            echo "Waiting for production API to be ready..."
+            sleep 20
+            
+            # Show container status
+            docker compose -f infra/compose.prod.yml ps
+            
+            # Check if container is running
+            if ! docker ps | grep llm-api-prod; then
+              echo "❌ Container llm-api-prod is not running!"
+              docker logs llm-api-prod --tail 50
+              exit 1
+            fi
+            
+            # Test health endpoint with retry
+            for i in {1..6}; do
+              if curl -f http://localhost:3000/health; then
+                echo "✅ Production API is healthy!"
+                break
+              fi
+              echo "Attempt $i/6: Waiting 10 more seconds..."
+              sleep 10
+              if [ $i -eq 6 ]; then
+                echo "❌ Health check failed after 60 seconds"
+                docker logs llm-api-prod --tail 30
+                exit 1
+              fi
+            done
+
+  notify:
+    needs: [deploy-staging, deploy-production]
+    runs-on: ubuntu-latest
+    if: always()
+    
+    steps:
+      - name: Determine environment
+        id: env
+        run: |
+          if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+            echo "environment=production" >> $GITHUB_OUTPUT
+            echo "port=3000" >> $GITHUB_OUTPUT
+          else
+            echo "environment=staging" >> $GITHUB_OUTPUT
+            echo "port=3001" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Deployment Status
+        run: |
+          if [[ "${{ needs.deploy-staging.result }}" == "success" || "${{ needs.deploy-production.result }}" == "success" ]]; then
+            echo "✅ Deployment to ${{ steps.env.outputs.environment }} successful!"
+            echo "🔗 API available at: http://${{ secrets.VPS_IP }}:${{ steps.env.outputs.port }}"
+          else
+            echo "❌ Deployment to ${{ steps.env.outputs.environment }} failed!"
+          fi

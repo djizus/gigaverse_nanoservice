@@ -1,0 +1,126 @@
+name: Test Branches
+
+on:
+  push:
+    branches:
+      - master
+      - develop
+      - contextfactory
+      - 'feature/**'
+    paths:
+      - 'llm-api/**'
+      - '.github/workflows/test-branches.yml'
+  
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'llm-api/**'
+
+  # Permet de lancer manuellement
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Branch to test'
+        required: false
+        default: 'current'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+      with:
+        ref: ${{ github.event.inputs.branch || github.ref }}
+    
+    - name: Set branch name
+      id: branch
+      run: |
+        if [ "${{ github.event_name }}" = "pull_request" ]; then
+          echo "name=${{ github.head_ref }}" >> $GITHUB_OUTPUT
+        else
+          echo "name=${GITHUB_REF#refs/heads/}" >> $GITHUB_OUTPUT
+        fi
+    
+    - name: Build Docker image
+      working-directory: ./llm-api
+      run: |
+        docker build -t llm-api:${{ steps.branch.outputs.name }} .
+    
+    - name: Start API
+      run: |
+        docker run -d \
+          --name llm-api-test \
+          -p 3001:3001 \
+          -e PORT=3001 \
+          -e NODE_ENV=test \
+          -e ANTHROPIC_API_KEY="${{ secrets.ANTHROPIC_API_KEY }}" \
+          -e SUPABASE_URL="${{ secrets.SUPABASE_URL }}" \
+          -e SUPABASE_API_KEY="${{ secrets.SUPABASE_API_KEY }}" \
+          -e MEMORY_TYPE=in-memory \
+          llm-api:${{ steps.branch.outputs.name }}
+        
+        # Wait for API to be ready
+        sleep 10
+        timeout 30 bash -c 'until curl -s http://localhost:3001/health; do sleep 1; done'
+    
+    - name: Run tests
+      working-directory: ./llm-api/scripts/test
+      run: |
+        chmod +x *.sh
+        ./run-all-tests.sh --no-server --port 3001
+      id: tests
+      continue-on-error: true
+    
+    - name: Save test results
+      if: always()
+      run: |
+        docker logs llm-api-test > api-logs.txt 2>&1
+        echo "Branch: ${{ steps.branch.outputs.name }}" > test-summary.txt
+        echo "Test Result: ${{ steps.tests.outcome }}" >> test-summary.txt
+        echo "Timestamp: $(date)" >> test-summary.txt
+    
+    - name: Upload artifacts
+      if: always()
+      uses: actions/upload-artifact@v3
+      with:
+        name: test-results-${{ steps.branch.outputs.name }}
+        path: |
+          test-summary.txt
+          api-logs.txt
+    
+    - name: Comment on PR
+      if: github.event_name == 'pull_request'
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const outcome = '${{ steps.tests.outcome }}';
+          const branch = '${{ steps.branch.outputs.name }}';
+          const emoji = outcome === 'success' ? '✅' : '❌';
+          const status = outcome === 'success' ? 'passed' : 'failed';
+          
+          const comment = `## ${emoji} API Tests ${status}
+          
+          **Branch:** ${branch}
+          **Status:** ${outcome}
+          **Time:** ${new Date().toISOString()}
+          
+          [View full logs](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})`;
+          
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: comment
+          });
+    
+    - name: Cleanup
+      if: always()
+      run: |
+        docker stop llm-api-test || true
+        docker rm llm-api-test || true
+    
+    - name: Exit with test status
+      if: steps.tests.outcome == 'failure'
+      run: exit 1

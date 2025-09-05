@@ -1,0 +1,16 @@
+{
+  "type": "module",
+  "scripts": {},
+  "dependencies": {
+    "@notionhq/client": "^3.0.1",
+    "@supabase/supabase-js": "^2.49.4",
+    "md-to-pdf": "^5.2.4",
+    "react-markdown": "^10.1.0"
+  },
+  "devDependencies": {
+    "prettier": "^3.6.2",
+    "supabase": "^2.33.9",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.8.3"
+  }
+}

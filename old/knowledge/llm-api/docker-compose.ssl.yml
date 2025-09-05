@@ -1,0 +1,124 @@
+version: '3.8'
+
+services:
+  llm-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      no_cache: true
+      pull: true
+    image: llm-api:latest
+    container_name: llm-api
+    expose:
+      - '3000'
+    env_file:
+      - .env.production
+    environment:
+      - NODE_ENV=production
+      - CHROMA_URL=http://chromadb:8000
+    volumes:
+      - ./knowledge:/app/knowledge
+      - ./templates:/app/templates
+      - ./logs:/app/logs
+    networks:
+      - llm-network
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'wget',
+          '--no-verbose',
+          '--tries=1',
+          '--spider',
+          'http://localhost:3000/health',
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+
+  # Nginx avec SSL Let's Encrypt
+  nginx:
+    build:
+      context: ./nginx
+      dockerfile: Dockerfile
+      no_cache: true
+    image: llm-api-nginx:latest
+    container_name: nginx-ssl
+    ports:
+      - '80:80'
+      - '443:443'
+    volumes:
+      - nginx-logs:/var/log/nginx
+      - certbot-etc:/etc/letsencrypt
+      - certbot-var:/var/lib/letsencrypt
+      - certbot-webroot:/var/www/certbot
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+    depends_on:
+      - llm-api
+    networks:
+      - llm-network
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'wget',
+          '--quiet',
+          '--tries=1',
+          '--spider',
+          'http://localhost/health',
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # Certbot pour Let's Encrypt (à exécuter manuellement)
+  certbot:
+    image: certbot/certbot
+    container_name: certbot
+    volumes:
+      - certbot-etc:/etc/letsencrypt
+      - certbot-var:/var/lib/letsencrypt
+      - certbot-webroot:/var/www/certbot
+    depends_on:
+      - nginx
+    command: ['sh', '-c', "echo 'Certbot service ready'"]
+    networks:
+      - llm-network
+
+  # ChromaDB (optionnel)
+  chromadb:
+    image: chromadb/chroma:latest
+    container_name: chromadb
+    expose:
+      - '8000'
+    volumes:
+      - chromadb-data:/chroma/chroma
+    environment:
+      - IS_PERSISTENT=TRUE
+      - PERSIST_DIRECTORY=/chroma/chroma
+      - ANONYMIZED_TELEMETRY=FALSE
+      - CHROMA_SERVER_CORS_ALLOW_ORIGINS=["*"]
+    networks:
+      - llm-network
+    restart: unless-stopped
+
+networks:
+  llm-network:
+    driver: bridge
+
+volumes:
+  chromadb-data:
+    driver: local
+  nginx-logs:
+    driver: local
+  certbot-etc:
+    driver: local
+  certbot-var:
+    driver: local
+  certbot-webroot:
+    driver: local

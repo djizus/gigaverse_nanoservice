@@ -1,0 +1,6 @@
+ignoredBuiltDependencies:
+  - '@nestjs/core'
+  - '@swc/core'
+  - esbuild
+  - protobufjs
+  - sharp

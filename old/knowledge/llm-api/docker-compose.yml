@@ -1,0 +1,64 @@
+version: '3.8'
+
+services:
+  llm-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: llm-api
+    ports:
+      - '${PORT:-3000}:3000'
+    env_file:
+      - .env.production
+    environment:
+      - NODE_ENV=production
+      - CHROMA_URL=http://chromadb:8000
+    volumes:
+      # Mount knowledge directory for live updates
+      - ./knowledge:/app/knowledge
+      # Mount templates if they exist
+      - ./templates:/app/templates
+      # Logs volume
+      - ./logs:/app/logs
+    networks:
+      - llm-network
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'wget',
+          '--no-verbose',
+          '--tries=1',
+          '--spider',
+          'http://localhost:3000/health',
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+
+  # ChromaDB service for vector search
+  chromadb:
+    image: chromadb/chroma:latest
+    container_name: chromadb
+    ports:
+      - '8000:8000'
+    volumes:
+      - chromadb-data:/chroma/chroma
+    environment:
+      - IS_PERSISTENT=TRUE
+      - PERSIST_DIRECTORY=/chroma/chroma
+      - ANONYMIZED_TELEMETRY=FALSE
+      - CHROMA_SERVER_CORS_ALLOW_ORIGINS=["*"]
+    networks:
+      - llm-network
+    restart: unless-stopped
+
+networks:
+  llm-network:
+    driver: bridge
+
+volumes:
+  chromadb-data:
+    driver: local

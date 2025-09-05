@@ -1,0 +1,78 @@
+services:
+  llm-api-staging:
+    image: ghcr.io/${GITHUB_REPOSITORY}:staging-latest
+    container_name: llm-api-staging
+    ports:
+      - '3001:3000'  # Expose on all interfaces for Caddy access
+    env_file:
+      - ../.env.staging
+    environment:
+      - NODE_ENV=staging
+      - PORT=3000  # Internal port stays 3000
+      - CHROMA_URL=http://chromadb-staging:8000
+    volumes:
+      # Staging-specific volumes to avoid conflicts with production
+      - staging-knowledge-data:/app/knowledge
+      - staging-templates-data:/app/templates
+      - staging-logs-data:/app/logs
+    networks:
+      - staging-network
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'wget',
+          '--no-verbose',
+          '--tries=1',
+          '--spider',
+          'http://localhost:3000/health',
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    labels:
+      - "com.docker.compose.project=staging"
+      - "environment=staging"
+
+  # ChromaDB for staging (optional)
+  chromadb-staging:
+    image: chromadb/chroma:latest
+    container_name: chromadb-staging
+    expose:
+      - '8000'
+    volumes:
+      - staging-chromadb-data:/chroma/chroma
+    environment:
+      - IS_PERSISTENT=TRUE
+      - PERSIST_DIRECTORY=/chroma/chroma
+      - ANONYMIZED_TELEMETRY=FALSE
+      - CHROMA_SERVER_CORS_ALLOW_ORIGINS=["*"]
+    networks:
+      - staging-network
+    restart: unless-stopped
+    labels:
+      - "environment=staging"
+
+networks:
+  staging-network:
+    name: staging-network
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.21.0.0/16  # Different subnet from production
+
+volumes:
+  staging-knowledge-data:
+    driver: local
+    name: staging-knowledge-data
+  staging-templates-data:
+    driver: local
+    name: staging-templates-data
+  staging-logs-data:
+    driver: local
+    name: staging-logs-data
+  staging-chromadb-data:
+    driver: local
+    name: staging-chromadb-data

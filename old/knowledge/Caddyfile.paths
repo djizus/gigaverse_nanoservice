@@ -1,0 +1,22 @@
+# Single domain with path-based routing
+aifred.cloud {
+    header {
+        Access-Control-Allow-Origin "*"
+        Access-Control-Allow-Methods "*"
+        Access-Control-Allow-Headers "*"
+        Access-Control-Allow-Credentials "true"
+    }
+    
+    @options method OPTIONS
+    respond @options 204
+    
+    # Staging API on /staging path
+    handle_path /staging/* {
+        reverse_proxy localhost:3001
+    }
+    
+    # Production API (default)
+    handle {
+        reverse_proxy localhost:3000
+    }
+}
