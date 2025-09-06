@@ -22,16 +22,22 @@ export function buildLootSystem(): string {
   ].join(' ');
 }
 
-export function buildStrategyContext(userContext: string): string {
+export function buildStrategyContext(
+  userContext: string,
+  opts?: { stage?: number; room?: number; absRoom?: number }
+): string {
   const base = (userContext || '').trim() || 'Maximize survival and progress with clear, legal moves.';
+  const loc = (opts?.stage && opts?.room)
+    ? `Location: Stage ${opts.stage}-${opts.room}${opts?.absRoom ? ` (abs ${opts.absRoom})` : ''}`
+    : undefined;
   return [
     'Strategy:', base,
+    loc ? loc : undefined,
     'Guidelines:',
     '- Only legal moves (charges > 0).',
     '- If low HP (<30%), prefer safer outcomes unless a winning move is certain.',
     '- Use RPS countering vs enemy.lastMove when EV is tied.',
-    '- Keep answers JSON-only and minimal.',
-  ].join('\n');
+  ].filter(Boolean).join('\n');
 }
 
 export function buildMoveInstruction(): string {
@@ -77,6 +83,8 @@ export function sanitizeStateForLLM(state: any) {
   if (!state) return {};
   try {
     const { currentDungeon, currentRoom, currentEnemy, lastBattleResult, lootPhase, player, enemy } = state;
+    const { computeStageRoom } = require('./gigaverse.utils');
+    const sr = computeStageRoom ? computeStageRoom(currentRoom) : { stage: 1, room: currentRoom || 1 };
     const pick = (p: any) => p ? {
       health: p.health ? { current: p.health.current, currentMax: p.health.currentMax } : undefined,
       shield: p.shield ? { current: p.shield.current, currentMax: p.shield.currentMax } : undefined,
@@ -90,6 +98,8 @@ export function sanitizeStateForLLM(state: any) {
       currentRoom,
       currentEnemy,
       lootPhase: !!lootPhase,
+      stage: sr.stage,
+      roomInStage: sr.room,
       lastBattleResult: lastBattleResult ?? null,
       player: pick(player),
       enemy: pick(enemy),

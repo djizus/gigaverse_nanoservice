@@ -18,7 +18,7 @@ CREATE TABLE IF NOT EXISTS run_summaries_simple (
   is_juiced BOOLEAN DEFAULT false,
   consumables JSONB DEFAULT '[]'::jsonb,
   gear_instance_ids JSONB DEFAULT '[]'::jsonb,
-  status TEXT NOT NULL DEFAULT 'started' CHECK (status IN ('started','processing','completed','failed')),
+  status TEXT NOT NULL DEFAULT 'started' CHECK (status IN ('started','processing','completed','failed','aborted')),
   error_message TEXT,
   details JSONB DEFAULT '[]'::jsonb,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),

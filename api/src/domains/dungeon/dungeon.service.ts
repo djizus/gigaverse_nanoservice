@@ -8,7 +8,8 @@ import {
   parseDungeonState,
   formatError,
   sleep,
-  formatBattleSummary
+  formatBattleSummary,
+  computeStageRoom
 } from '../gigaverse/gigaverse.utils';
 import { DatabaseService } from '../../infrastructure/database/database.service';
 import { logError, logSuccess, throwError, formatError as formatErrorMessage } from '../../shared/utils/error.utils';
@@ -16,7 +17,7 @@ import { CreateDungeonRunInput } from '../../infrastructure/database/types';
 import { DaydreamsAgentService, RoomDecisionHistoryItem } from '../../infrastructure/ai/daydreams.agent';
 import { aiConfig } from '../../infrastructure/config/ai.config';
 
-const ACTION_DELAY_MS = 2000; // Delay between actions to avoid rate limiting
+const ACTION_DELAY_MS = 100; // Small delay to avoid hammering APIs
 
 export class DungeonService {
   private agent: DaydreamsAgentService | null;
@@ -137,6 +138,7 @@ export class DungeonService {
       
       // Execute all requested runs
       let aborted = false;
+      let successfulRuns = 0;
       for (let runNumber = 1; runNumber <= totalRuns; runNumber++) {
         console.log(`\n🗡️ Processing run ${runNumber}/${totalRuns}...`);
         console.log(`[TokenDebug] Starting run ${runNumber} - initial token: ${gameClient.getActionToken()}`);
@@ -180,6 +182,14 @@ export class DungeonService {
         
         if (success) {
           completedRuns++;
+          // Determine success: reaching Stage 4-4 with HP left
+          try {
+            const srDone = computeStageRoom(dungeonState.currentRoom);
+            const hp = dungeonState.player?.health?.current ?? 0;
+            if (dungeonState.isComplete && srDone.stage === 4 && srDone.room === 4 && hp > 0) {
+              successfulRuns++;
+            }
+          } catch {}
         } else {
           // Execution failed (agent error or other). Abort remaining runs.
           aborted = true;
@@ -187,16 +197,7 @@ export class DungeonService {
           break;
         }
         
-        // Longer delay between runs to let game settle
-        if (runNumber < totalRuns) {
-          const betweenRunsDelay = 5000; // 5 seconds
-          console.log(`[TokenDebug] ========== END OF RUN ${runNumber} ==========`);
-          console.log(`[TokenDebug] Token state before delay: ${gameClient.getActionToken()}`);
-          console.log(`[TokenDebug] Waiting ${betweenRunsDelay}ms between runs for game to settle...`);
-          await sleep(betweenRunsDelay);
-          console.log(`[TokenDebug] Delay complete, ready for run ${runNumber + 1}`);
-          console.log(`[TokenDebug] Token state after delay: ${gameClient.getActionToken()}`);
-        }
+        // No between-runs delay to maximize throughput
       }
 
       if (!aborted) {
@@ -209,7 +210,7 @@ export class DungeonService {
           run_log_id: null, // null for session-level events
           event_type: 'all_runs_completed',
           message: `All dungeon runs completed! ${completedRuns}/${totalRuns} successful`,
-          event_data: { completedRuns, totalRuns, successRate: (completedRuns / totalRuns) * 100 }
+          event_data: { completedRuns, totalRuns, successfulRuns, successRate: (successfulRuns / totalRuns) * 100 }
         });
 
         console.log(`✅ Completed all runs for ${dungeonRunId}: ${completedRuns}/${totalRuns} successful`);
@@ -219,7 +220,7 @@ export class DungeonService {
       
     } catch (error) {
       logError({ operation: 'Background processing', module: 'DungeonService', details: { dungeonRunId } }, error);
-      await this.databaseService.failDungeonRun(dungeonRunId, formatErrorMessage(error));
+      await this.databaseService.abortDungeonRun(dungeonRunId, formatErrorMessage(error));
     }
   }
   
@@ -247,6 +248,7 @@ export class DungeonService {
     let battlesWon = 0;
     let battlesLost = 0;
     let itemsGained = 0;
+    const statsTally: Record<string, number> = {};
     const moves: string[] = [];
     const lootChoices: string[] = [];
 
@@ -297,13 +299,14 @@ export class DungeonService {
             player: dungeonState.player,
             enemy: dungeonState.enemy,
           });
-          // Loot phase - use heuristics for best loot option
+          // Loot phase - enriched logging with stage/room
+          const srLoot = computeStageRoom(dungeonState.currentRoom);
           await this.databaseService.logEvent(
             dungeonRunId,
             runLog.id,
             'loot_phase',
-            `Loot phase: ${dungeonState.lootOptions.length} options available`,
-            { lootOptions: dungeonState.lootOptions, state: statePreview }
+            `Loot phase (stage ${srLoot.stage}-${srLoot.room}): ${dungeonState.lootOptions.length} options available`,
+            { lootOptions: dungeonState.lootOptions, state: statePreview, stage: srLoot.stage, roomInStage: srLoot.room, absRoom: dungeonState.currentRoom }
           );
           
           // Agent-only decision for loot
@@ -325,7 +328,8 @@ export class DungeonService {
           try {
             const { buildLootSystem, buildStrategyContext, sanitizeLootOptionsForLLM, sanitizeStateForLLM } = await import('../gigaverse/gigaverse.prompts');
             const system = buildLootSystem();
-            const strategy = buildStrategyContext(context);
+            const locLoot = computeStageRoom(dungeonState.currentRoom);
+            const strategy = buildStrategyContext(context, { stage: locLoot.stage, room: locLoot.room, absRoom: dungeonState.currentRoom });
             const compactState = sanitizeStateForLLM({
               currentDungeon: dungeonState.currentDungeon,
               currentRoom: dungeonState.currentRoom,
@@ -385,7 +389,7 @@ export class DungeonService {
               { phase: 'loot', error: formatErrorMessage(err), model: llmModel || 'default', room: dungeonState.currentRoom }
             );
             await this.databaseService.updateRunLog(runLog.id, { status: 'error', error_message: message });
-            await this.databaseService.failDungeonRun(dungeonRunId, message);
+            await this.databaseService.abortDungeonRun(dungeonRunId, message);
             return false;
           }
           
@@ -398,6 +402,8 @@ export class DungeonService {
           };
           
           await sleep(ACTION_DELAY_MS);
+          // Snapshot stats before loot to compute deltas
+          const before = dungeonState.player;
           const lootResponse = await gameClient.selectLoot(lootChoice as any, dungeonId, lootData);
           
           if (!lootResponse.success) {
@@ -409,15 +415,39 @@ export class DungeonService {
             throw new Error('Failed to parse dungeon state after loot selection');
           }
           
-          const itemsGainedThisLoot = lootResponse.gameItemBalanceChanges?.length || 0;
+          // Track items (rare on loot) if any
+          const itemsGainedThisLoot = Array.isArray((lootResponse as any).gameItemBalanceChanges)
+            ? (lootResponse as any).gameItemBalanceChanges.length
+            : 0;
           itemsGained += itemsGainedThisLoot;
+
+          // Compute stat deltas from before → after
+          const after = dungeonState.player;
+          const delta: Record<string, number> = {};
+          function addDelta(key: string, a?: number, b?: number) {
+            const d = (Number(b ?? 0) - Number(a ?? 0));
+            if (d > 0) {
+              delta[key] = (delta[key] || 0) + d;
+              statsTally[key] = (statsTally[key] || 0) + d;
+            }
+          }
+          try {
+            addDelta('health.max', before?.health?.currentMax, after?.health?.currentMax);
+            addDelta('shield.max', before?.shield?.currentMax, after?.shield?.currentMax);
+            addDelta('rock.atk', before?.rock?.currentATK, after?.rock?.currentATK);
+            addDelta('rock.def', before?.rock?.currentDEF, after?.rock?.currentDEF);
+            addDelta('paper.atk', before?.paper?.currentATK, after?.paper?.currentATK);
+            addDelta('paper.def', before?.paper?.currentDEF, after?.paper?.currentDEF);
+            addDelta('scissor.atk', before?.scissor?.currentATK, after?.scissor?.currentATK);
+            addDelta('scissor.def', before?.scissor?.currentDEF, after?.scissor?.currentDEF);
+          } catch {}
           
           await this.databaseService.logEvent(
             dungeonRunId,
             runLog.id,
             'loot_selected',
             `Selected ${lootChoice}, gained ${itemsGainedThisLoot} items`,
-            { lootChoice, itemsGained: itemsGainedThisLoot }
+            { lootChoice, itemsGained: itemsGainedThisLoot, statsDelta: delta, statsTally }
           );
 
         } else {
@@ -432,17 +462,20 @@ export class DungeonService {
             player: dungeonState.player,
             enemy: dungeonState.enemy,
           });
+          const srEnter = computeStageRoom(dungeonState.currentRoom);
           await this.databaseService.logEvent(
             dungeonRunId,
             runLog.id,
             'room_entered',
-            `Entered room ${dungeonState.currentRoom}, facing enemy ${dungeonState.currentEnemy}`,
+            `Entered stage ${srEnter.stage}-${srEnter.room} (abs ${dungeonState.currentRoom}), enemy ${dungeonState.currentEnemy}`,
             { 
               room: dungeonState.currentRoom, 
               enemy: dungeonState.currentEnemy,
               playerHP: dungeonState.player.health.current,
               enemyHP: dungeonState.enemy.health.current,
-              state: statePreview
+              state: statePreview,
+              stage: srEnter.stage,
+              roomInStage: srEnter.room
             }
           );
           
@@ -465,7 +498,8 @@ export class DungeonService {
           try {
             const { buildMoveSystem, buildStrategyContext, sanitizeStateForLLM, buildMoveInstruction, parseMoveFromText } = await import('../gigaverse/gigaverse.prompts');
             const system = buildMoveSystem();
-            const strategy = buildStrategyContext(context);
+            const locMove = computeStageRoom(dungeonState.currentRoom);
+            const strategy = buildStrategyContext(context, { stage: locMove.stage, room: locMove.room, absRoom: dungeonState.currentRoom });
             const compactState = sanitizeStateForLLM({
               currentDungeon: dungeonState.currentDungeon,
               currentRoom: dungeonState.currentRoom,
@@ -523,7 +557,7 @@ export class DungeonService {
               { phase: 'combat', error: formatErrorMessage(err), model: llmModel || 'default', room: dungeonState.currentRoom }
             );
             await this.databaseService.updateRunLog(runLog.id, { status: 'error', error_message: message });
-            await this.databaseService.failDungeonRun(dungeonRunId, message);
+            await this.databaseService.abortDungeonRun(dungeonRunId, message);
             return false;
           }
           
@@ -550,6 +584,36 @@ export class DungeonService {
             throw new Error(`Combat move failed: ${moveResponse.message}`);
           }
           
+          // Track gear/items gained after this action if any
+          try {
+            const changes = Array.isArray((moveResponse as any).gameItemBalanceChanges)
+              ? (moveResponse as any).gameItemBalanceChanges as any[]
+              : [];
+            const byRarityDelta: Record<string, number> = {};
+            const byIdDelta: Record<string, number> = {};
+            let gained = 0;
+            for (const ch of changes) {
+              const amt = Number(ch?.amount || 0);
+              if (amt > 0) {
+                gained += amt;
+                const rarity = String(ch?.rarity ?? 'unknown');
+                byRarityDelta[rarity] = (byRarityDelta[rarity] || 0) + amt;
+                const id = String(ch?.id ?? 'unknown');
+                byIdDelta[id] = (byIdDelta[id] || 0) + amt;
+              }
+            }
+            if (gained > 0) {
+              itemsGained += gained;
+              await this.databaseService.logEvent(
+                dungeonRunId,
+                runLog.id,
+                'loot_selected',
+                `Gained ${gained} item(s) from combat`,
+                { gainedFrom: 'combat', itemsGainedNow: gained, totalItemsGained: itemsGained, byRarityDelta, byIdDelta }
+              );
+            }
+          } catch {}
+
           dungeonState = parseDungeonState(moveResponse);
           if (!dungeonState) {
             throw new Error('Failed to parse dungeon state after move');
@@ -592,14 +656,11 @@ export class DungeonService {
             runLog.id,
             'run_completed',
             `Run ${runNumber} completed! Cleared ${roomsCleared} rooms`,
-            { status: 'completed', roomsCleared, battlesWon, battlesLost, itemsGained }
+            { status: 'completed', roomsCleared, battlesWon, battlesLost, itemsGained, statsTally }
           );
           
-          // Clear token after completion so next run starts fresh
-          console.log(`[TokenDebug] Run ${runNumber} COMPLETED - token before clearing: ${gameClient.getActionToken()}`);
-          gameClient.setActionToken("");
-          console.log(`[TokenDebug] Run ${runNumber} COMPLETED - token after clearing: ${gameClient.getActionToken()}`);
-          console.log(`[TokenDebug] Run ${runNumber} COMPLETED - next run will start fresh`);
+          // Keep token to satisfy server tracking for the next action
+          console.log(`[TokenDebug] Run ${runNumber} COMPLETED - preserving token: ${gameClient.getActionToken()}`);
           break;
         }
         
@@ -612,11 +673,8 @@ export class DungeonService {
             { status: 'died', roomsCleared, battlesWon, battlesLost, itemsGained }
           );
           
-          // Clear token after death so next run starts fresh
-          console.log(`[TokenDebug] Run ${runNumber} DIED - token before clearing: ${gameClient.getActionToken()}`);
-          gameClient.setActionToken("");
-          console.log(`[TokenDebug] Run ${runNumber} DIED - token after clearing: ${gameClient.getActionToken()}`);
-          console.log(`[TokenDebug] Run ${runNumber} DIED - next run will start fresh`);
+          // Keep token; server may require prior token for tracking
+          console.log(`[TokenDebug] Run ${runNumber} DIED - preserving token: ${gameClient.getActionToken()}`);
           break;
         }
       }
@@ -663,11 +721,8 @@ export class DungeonService {
         error_message: formatError(error)
       });
       
-      // Clear token on error so next run starts fresh
-      console.log(`[TokenDebug] Run ${runNumber} ERROR - token before clearing: ${gameClient.getActionToken()}`);
-      gameClient.setActionToken("");
-      console.log(`[TokenDebug] Run ${runNumber} ERROR - token after clearing: ${gameClient.getActionToken()}`);
-      console.log(`[TokenDebug] Run ${runNumber} ERROR - next run will start fresh`);
+      // Keep token; server may require prior token for next action
+      console.log(`[TokenDebug] Run ${runNumber} ERROR - preserving token: ${gameClient.getActionToken()}`);
       return false;
     }
   }
@@ -750,7 +805,7 @@ export class DungeonService {
       await sleep(ACTION_DELAY_MS);
       
       console.log(`[InitDebug] Calling gameClient.startRun()...`);
-      const startResponse = await gameClient.startRun(startPayload);
+      let startResponse = await gameClient.startRun(startPayload);
       
       console.log(`[InitDebug] StartRun response success: ${startResponse.success}`);
       console.log(`[InitDebug] StartRun response:`, JSON.stringify(startResponse, null, 2));
@@ -758,7 +813,19 @@ export class DungeonService {
       
       if (!startResponse.success) {
         console.log(`[InitDebug] ❌ Start run failed: ${startResponse.message}`);
-        throw new Error(`Failed to start run: ${startResponse.message}`);
+        // Retry once if token-related: try refreshing token via status and retry
+        try {
+          console.log(`[InitDebug] Attempting token refresh via fetchDungeonState ...`);
+          const status2 = await gameClient.fetchDungeonState();
+          if (status2 && (status2 as any).actionToken) {
+            gameClient.setActionToken((status2 as any).actionToken);
+            console.log(`[InitDebug] Retrying startRun with refreshed token: ${(status2 as any).actionToken}`);
+            startResponse = await gameClient.startRun(startPayload);
+          }
+        } catch {}
+        if (!startResponse.success) {
+          throw new Error(`Failed to start run: ${startResponse.message}`);
+        }
       }
       
       console.log(`[InitDebug] Parsing dungeon state from response...`);

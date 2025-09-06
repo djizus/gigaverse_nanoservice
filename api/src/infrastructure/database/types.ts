@@ -11,7 +11,7 @@ export interface SummaryRun {
   is_juiced: boolean;
   consumables: any[];
   gear_instance_ids: any[];
-  status: 'started' | 'processing' | 'completed' | 'failed';
+  status: 'started' | 'processing' | 'completed' | 'failed' | 'aborted';
   error_message?: string | null;
   details?: SummaryDetail[];
   created_at: string;

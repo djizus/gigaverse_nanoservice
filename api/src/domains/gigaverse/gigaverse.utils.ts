@@ -321,3 +321,14 @@ export function formatError(error: unknown): string {
   }
   return String(error);
 }
+
+/**
+ * Compute stage/room from absolute room number.
+ * Stages are 1..4 and rooms are 1..4. Example: 12 => 3-4, 16 => 4-4, 2 => 1-2
+ */
+export function computeStageRoom(absRoom: number): { stage: number; room: number } {
+  const r = Math.max(1, Number(absRoom) || 1);
+  const stage = Math.min(4, Math.ceil(r / 4));
+  const room = ((r - 1) % 4) + 1;
+  return { stage, room };
+}

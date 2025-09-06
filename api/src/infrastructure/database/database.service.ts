@@ -309,15 +309,13 @@ export class DatabaseService {
    * Mark dungeon run as completed
    */
   async completeDungeonRun(dungeonRunId: string, completedRuns: number): Promise<void> {
-    const result = await this.supabase
+    const { error } = await this.supabase
       .from('run_summaries_simple')
       .update({ completed_runs: completedRuns, status: 'completed', completed_at: new Date().toISOString() })
-      .eq('id', dungeonRunId)
-      .select()
-      .single();
+      .eq('id', dungeonRunId);
 
-    if (!result.success) {
-      logError({ operation: 'Complete dungeon run', module: 'Database', details: { dungeonRunId } }, result.error);
+    if (error) {
+      logError({ operation: 'Complete dungeon run', module: 'Database', details: { dungeonRunId } }, error.message || error);
     } else {
       logSuccess('Database', 'Dungeon run completed', { dungeonRunId, completedRuns });
     }
@@ -327,12 +325,10 @@ export class DatabaseService {
    * Mark dungeon run as failed
    */
   async failDungeonRun(dungeonRunId: string, error: string): Promise<void> {
-    const result = await this.supabase
+    const { error: err } = await this.supabase
       .from('run_summaries_simple')
       .update({ status: 'failed', error_message: error })
-      .eq('id', dungeonRunId)
-      .select()
-      .single();
+      .eq('id', dungeonRunId);
 
     // Log error event (session-level, no specific run log)
     await this.createRunEvent({
@@ -343,11 +339,34 @@ export class DatabaseService {
       event_data: { error }
     });
 
-    if (!result.success) {
-      console.error('Failed to mark dungeon run as failed:', result.error);
+    if (err) {
+      console.error('Failed to mark dungeon run as failed:', err.message || err);
     } else {
       console.log(`❌ Dungeon run ${dungeonRunId} failed: ${error}`);
     }
+  }
+
+  /**
+   * Mark dungeon run as aborted (distinct from failed) to unblock new runs
+   */
+  async abortDungeonRun(dungeonRunId: string, reason: string): Promise<void> {
+    const { error } = await this.supabase
+      .from('run_summaries_simple')
+      .update({ status: 'aborted', error_message: reason })
+      .eq('id', dungeonRunId);
+    if (error) {
+      console.error('Failed to mark dungeon run as aborted:', error.message || error);
+    } else {
+      console.log(`⛔ Dungeon run ${dungeonRunId} aborted: ${reason}`);
+    }
+    // Log abort event (session-level)
+    await this.createRunEvent({
+      dungeon_run_id: dungeonRunId,
+      run_log_id: null,
+      event_type: 'error',
+      message: `Run aborted: ${reason}`,
+      event_data: { reason: 'aborted' }
+    });
   }
 
   /**

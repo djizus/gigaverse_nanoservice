@@ -37,7 +37,7 @@ export function App() {
   const [dgDungeonId, setDgDungeonId] = useState(1);
   const [dgRuns, setDgRuns] = useState(1);
   const [dgJuiced, setDgJuiced] = useState(false);
-  const [dgContext, setDgContext] = useState('Be aggressive in combat, prioritize attack upgrades when looting');
+  const [dgContext, setDgContext] = useState('Be aggressive in combat.\nPrioritize attack and armor upgrades when looting.\nHeal when low on health.');
   const [dgModel, setDgModel] = useState(knownModels[0]);
   const [liveEvents, setLiveEvents] = useState<Record<string, any[]>>({});
   const [liveRuns, setLiveRuns] = useState<string[]>([]);
@@ -403,7 +403,7 @@ export function App() {
               </div>
             </div>
             <div style={{ marginBottom: 8 }}>
-              <label>Context</label>
+              <label>Instructions</label>
               <textarea style={{ minHeight: 100 }} value={dgContext} onChange={(e) => setDgContext(e.target.value)} />
             </div>
             <div className="row">
@@ -457,11 +457,20 @@ export function App() {
             {liveRuns.map(rid => {
               const events = liveEvents[rid] || [];
               const last = events[events.length - 1];
+              // Derive stage-room badge
+              const stage = (last && (last.stage || (last.state && last.state.stage))) || undefined;
+              const roomInStage = (last && (last.roomInStage || (last.state && last.state.roomInStage))) || undefined;
+              const absRoom = (last && (last.absRoom || (last.room))) || undefined;
               return (
                 <div key={rid} className="row" style={{ alignItems: 'center', marginBottom: 8 }}>
                   <div style={{ flex: 1 }}>
                     <div style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis' }}>{rid}</div>
-                    <div style={{ fontSize: 12, color: '#666' }}>{last ? `${last.type} · ${new Date(last.timestamp || Date.now()).toLocaleTimeString()}` : 'waiting...'}</div>
+                    <div style={{ fontSize: 12, color: '#666', display: 'flex', gap: 8, alignItems: 'center' }}>
+                      <span>{last ? `${last.type} · ${new Date(last.timestamp || Date.now()).toLocaleTimeString()}` : 'waiting...'}</span>
+                      {stage && roomInStage && (
+                        <span className="badge">Stage {stage}-{roomInStage}{absRoom ? ` (abs ${absRoom})` : ''}</span>
+                      )}
+                    </div>
                   </div>
                   <div className="toolbar">
                     <button className="btn" onClick={() => setSelectedRunId(rid)}>Open</button>
@@ -485,12 +494,52 @@ export function App() {
                 </div>
               </div>
               <div className="messages" style={{ maxHeight: 380 }} ref={detailRef}>
-                {(liveEvents[selectedRunId] || []).map((e, i) => (
-                  <div key={i} className={`msg assistant`}>
-                    <div className="meta">{e.type} · {new Date(e.timestamp || Date.now()).toLocaleTimeString()}</div>
-                    <div className="bubble"><code style={{ whiteSpace: 'pre-wrap' }}>{JSON.stringify(e)}</code></div>
-                  </div>
-                ))}
+                {(liveEvents[selectedRunId] || []).map((e, i) => {
+                  const ts = new Date(e.timestamp || Date.now()).toLocaleTimeString();
+                  let summary = '';
+                  if (e.type === 'room_entered') {
+                    const stage = e.stage || e.state?.stage;
+                    const roomInStage = e.roomInStage || e.state?.roomInStage;
+                    summary = `Entered stage ${stage}-${roomInStage} (abs ${e.room || e.state?.currentRoom}) · enemy ${e.enemy}`;
+                  } else if (e.type === 'combat_move') {
+                    summary = `Move: ${e.move} · charges: ${e.playerCharges}`;
+                  } else if (e.type === 'battle_result') {
+                    summary = `Result: ${e.result} · HP ${e.playerHP}/${e.enemyHP}`;
+                  } else if (e.type === 'loot_phase') {
+                    summary = `Loot phase: ${Array.isArray(e.lootOptions) ? e.lootOptions.length : 0} options`;
+                  } else if (e.type === 'loot_selected') {
+                    if (e.gainedFrom === 'combat') {
+                      // Show item gains by rarity if available
+                      const rar = e.byRarityDelta ? Object.entries(e.byRarityDelta).map(([k,v]) => `${k}+${v}`).join(', ') : '';
+                      summary = `Combat loot: +${e.itemsGainedNow} item(s)` + (rar ? ` (${rar})` : '');
+                    } else {
+                      // Show stat bonuses
+                      const sd = e.statsDelta || {};
+                      const parts = Object.keys(sd).map(k => `${k} +${sd[k]}`).join(', ');
+                      summary = `Loot: ${e.lootChoice || ''}` + (parts ? ` · ${parts}` : '');
+                    }
+                  } else if (e.type === 'run_completed') {
+                    const tally = e.statsTally ? ` · stats: ${Object.entries(e.statsTally).map(([k,v])=>`${k}+${v}`).join(', ')}` : '';
+                    summary = e.status === 'completed' ? `Run completed · rooms ${e.roomsCleared}${tally}` : `Run ended: ${e.status}`;
+                  } else if (e.type === 'all_runs_completed') {
+                    summary = `All runs completed ${e.completedRuns}/${e.totalRuns} · successRate: ${Math.round((e.successRate||0))}%`;
+                  } else if (e.type === 'agent_decision_move') {
+                    summary = `Agent decided: move=${(e.message||'').split(': ')[1] || ''}`;
+                  } else if (e.type === 'agent_decision_loot') {
+                    summary = `Agent decided: loot=${(e.message||'').split(': ')[1] || ''}`;
+                  } else if (e.type === 'error' || e.type === 'agent_error') {
+                    summary = e.message || 'Error';
+                  }
+                  return (
+                    <div key={i} className={`msg assistant`}>
+                      <div className="meta">{e.type} · {ts}</div>
+                      <div className="bubble">
+                        {summary ? <div style={{ marginBottom: 6 }}>{summary}</div> : null}
+                        <code style={{ whiteSpace: 'pre-wrap' }}>{JSON.stringify(e)}</code>
+                      </div>
+                    </div>
+                  );
+                })}
                 {(liveEvents[selectedRunId] || []).length === 0 && (
                   <div style={{ color: '#666' }}>No events yet for this run.</div>
                 )}
