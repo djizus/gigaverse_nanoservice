@@ -1,6 +1,6 @@
-// Database types for Supabase tables
+// Simplified database types for single-table summaries (run_summaries_simple)
 
-export interface DungeonRun {
+export interface SummaryRun {
   id: string;
   player_address: string;
   context: string;
@@ -10,62 +10,23 @@ export interface DungeonRun {
   dungeon_id: number;
   is_juiced: boolean;
   consumables: any[];
-  gear_instance_ids: string[];
+  gear_instance_ids: any[];
   status: 'started' | 'processing' | 'completed' | 'failed';
   error_message?: string | null;
-  details?: any[];
+  details?: SummaryDetail[];
   created_at: string;
   updated_at: string;
   completed_at: string | null;
 }
 
-export interface RunLog {
-  id: string;
-  dungeon_run_id: string;
-  run_number: number;
-  status: 'started' | 'processing' | 'completed' | 'died' | 'error';
-  rooms_cleared: number;
-  battles_won: number;
-  battles_lost: number;
-  items_gained: number;
-  moves: string[];
-  loot_choices: string[];
-  player_stats: {
-    startHP: number;
-    endHP: number;
-    maxHP: number;
-  } | null;
-  start_time: string;
-  end_time: string | null;
-  error_message: string | null;
-}
-
-export type EventType = 
-  | 'run_started' 
-  | 'room_entered' 
-  | 'combat_move' 
-  | 'battle_result'
-  | 'loot_phase' 
-  | 'loot_selected' 
-  | 'room_cleared' 
-  | 'run_completed'
-  | 'all_runs_completed' 
-  | 'error'
-  | 'agent_decision_move'
-  | 'agent_decision_loot'
-  | 'agent_error';
-
-export interface RunEvent {
-  id: string;
-  dungeon_run_id: string;
-  run_log_id: string | null;
-  event_type: EventType;
-  event_data: Record<string, any>;
+export interface SummaryDetail {
+  event_type: string;
   message: string;
+  event_data?: Record<string, any>;
   timestamp: string;
+  run_log_id?: string | null;
 }
 
-// Input types for creating records
 export interface CreateDungeonRunInput {
   player_address: string;
   context: string;
@@ -74,55 +35,22 @@ export interface CreateDungeonRunInput {
   dungeon_id: number;
   is_juiced?: boolean;
   consumables?: any[];
-  gear_instance_ids?: string[];
+  gear_instance_ids?: any[];
 }
 
-export interface CreateRunLogInput {
-  dungeon_run_id: string;
-  run_number: number;
-  player_stats?: {
-    startHP: number;
-    endHP: number;
-    maxHP: number;
-  };
-}
-
-export interface CreateRunEventInput {
-  dungeon_run_id: string;
-  run_log_id: string | null;
-  event_type: EventType;
-  event_data?: Record<string, any>;
-  message: string;
-}
-
-// Update types
 export interface UpdateDungeonRunInput {
   completed_runs?: number;
-  status?: DungeonRun['status'];
+  status?: SummaryRun['status'];
   completed_at?: string;
+  error_message?: string | null;
 }
 
-export interface UpdateRunLogInput {
-  status?: RunLog['status'];
-  rooms_cleared?: number;
-  battles_won?: number;
-  battles_lost?: number;
-  items_gained?: number;
-  moves?: string[];
-  loot_choices?: string[];
-  player_stats?: RunLog['player_stats'];
-  end_time?: string;
-  error_message?: string;
-}
-
-// Response types for API
 export interface DungeonRunResponse {
   runId: string;
   status: string;
   message: string;
 }
 
-// Database operation result
 export interface DatabaseResult<T = any> {
   success: boolean;
   data?: T;

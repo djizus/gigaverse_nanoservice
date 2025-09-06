@@ -95,7 +95,7 @@ export async function createApp(deps: AppDeps) {
   app.route('/', createHealthRoutes());
   app.route('/', createGameRoutes(dungeonController, deps.paymentConfig, databaseService));
   app.route('/', createDungeonEventsRoutes());
-  app.route('/', createDungeonUiRoutes(dungeonController));
+  app.route('/', createDungeonUiRoutes(dungeonController, databaseService));
   app.route('/', createDaydreamsRoutes({ 
     agentService, 
     contextRegistry, 

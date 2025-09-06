@@ -10,14 +10,14 @@ export const createDungeonEventsRoutes = () => {
     return streamSSE(c, async (sse) => {
       const unsubscribe = subscribe(async (evt) => {
         try {
-          // Emit using event.type for better client routing
-          await sse.writeSSE({ event: String(evt?.type || 'event'), data: JSON.stringify(evt) });
+          // Emit as default message event for broad client compatibility
+          await sse.writeSSE({ data: JSON.stringify(evt) });
         } catch {}
       });
 
       // Heartbeat to keep connection alive
       const heartbeat = setInterval(async () => {
-        try { await sse.writeSSE({ event: 'ping', data: JSON.stringify({ t: Date.now() }) }); } catch {}
+        try { await sse.writeSSE({ data: JSON.stringify({ type: 'ping', t: Date.now() }) }); } catch {}
       }, 15000);
 
       // Cleanup on close
@@ -32,4 +32,3 @@ export const createDungeonEventsRoutes = () => {
 
   return app;
 };
-

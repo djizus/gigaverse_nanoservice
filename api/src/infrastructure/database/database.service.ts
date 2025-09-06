@@ -2,16 +2,11 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { SupabaseConfig } from '../config/env.config';
 import { logError, logSuccess, formatError } from '../../shared/utils/error.utils';
 import {
-  DungeonRun,
-  RunLog,
-  RunEvent,
+  SummaryRun,
+  SummaryDetail,
   CreateDungeonRunInput,
-  CreateRunLogInput,
-  CreateRunEventInput,
   UpdateDungeonRunInput,
-  UpdateRunLogInput,
   DatabaseResult,
-  EventType
 } from './types';
 
 export class DatabaseService {
@@ -24,7 +19,7 @@ export class DatabaseService {
 
   // ===== DUNGEON RUNS =====
   
-  async createDungeonRun(input: CreateDungeonRunInput): Promise<DatabaseResult<DungeonRun>> {
+  async createDungeonRun(input: CreateDungeonRunInput): Promise<DatabaseResult<SummaryRun>> {
     try {
       const payload: any = {
         player_address: input.player_address,
@@ -57,7 +52,7 @@ export class DatabaseService {
     }
   }
 
-  async updateDungeonRun(id: string, input: UpdateDungeonRunInput): Promise<DatabaseResult<DungeonRun>> {
+  async updateDungeonRun(id: string, input: UpdateDungeonRunInput): Promise<DatabaseResult<SummaryRun>> {
     try {
       const { data, error } = await this.supabase
         .from('run_summaries_simple')
@@ -78,7 +73,7 @@ export class DatabaseService {
     }
   }
 
-  async getDungeonRun(id: string): Promise<DatabaseResult<DungeonRun>> {
+  async getDungeonRun(id: string): Promise<DatabaseResult<SummaryRun>> {
     try {
       const { data, error } = await this.supabase
         .from('run_summaries_simple')
@@ -98,7 +93,29 @@ export class DatabaseService {
     }
   }
 
-  async getActiveRunForPlayer(playerAddress: string): Promise<DatabaseResult<DungeonRun | null>> {
+  async listRuns(opts: { status?: ('started'|'processing'|'completed'|'failed')[], limit?: number } = {}): Promise<DatabaseResult<SummaryRun[]>> {
+    try {
+      let query = this.supabase
+        .from('run_summaries_simple')
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (opts.status && opts.status.length) {
+        query = query.in('status', opts.status);
+      }
+      if (opts.limit && opts.limit > 0) {
+        query = query.limit(opts.limit);
+      } else {
+        query = query.limit(50);
+      }
+      const { data, error } = await query;
+      if (error) return { success: false, error: error.message };
+      return { success: true, data: data || [] };
+    } catch (error) {
+      return { success: false, error: String(error) };
+    }
+  }
+
+  async getActiveRunForPlayer(playerAddress: string): Promise<DatabaseResult<SummaryRun | null>> {
     try {
       // Check for ANY active runs for this player (regardless of dungeon type)
       // Since Gigaverse only allows one action at a time
@@ -134,7 +151,7 @@ export class DatabaseService {
 
   // ===== RUN LOGS =====
 
-  async createRunLog(input: CreateRunLogInput): Promise<DatabaseResult<RunLog>> {
+  async createRunLog(input: any): Promise<DatabaseResult<any>> {
     // No-op DB: synthesize a run log entry and append to details
     try {
       const id = (globalThis as any).crypto?.randomUUID?.() || String(Date.now());
@@ -161,7 +178,7 @@ export class DatabaseService {
     }
   }
 
-  async updateRunLog(id: string, input: UpdateRunLogInput): Promise<DatabaseResult<RunLog>> {
+  async updateRunLog(id: string, input: any): Promise<DatabaseResult<any>> {
     // No-op DB: pretend successful update; details are tracked via createRunEvent
     try {
       const updated: RunLog = {
@@ -187,14 +204,14 @@ export class DatabaseService {
     }
   }
 
-  async getRunLogsByDungeonRun(dungeonRunId: string): Promise<DatabaseResult<RunLog[]>> {
+  async getRunLogsByDungeonRun(dungeonRunId: string): Promise<DatabaseResult<any[]>> {
     // No dedicated run logs table in simplified schema
     return { success: true, data: [] };
   }
 
   // ===== RUN EVENTS =====
 
-  async createRunEvent(input: CreateRunEventInput): Promise<DatabaseResult<RunEvent>> {
+  async createRunEvent(input: { dungeon_run_id: string; run_log_id: string | null; event_type: string; event_data?: Record<string, any>; message: string; }): Promise<DatabaseResult<any>> {
     // Publish to in-memory event bus for SSE (best-effort), and best-effort append to summaries
     try {
       const { publish } = await import('../events/event-bus');
@@ -240,7 +257,7 @@ export class DatabaseService {
     }
   }
 
-  async getRunEventsByDungeonRun(dungeonRunId: string): Promise<DatabaseResult<RunEvent[]>> {
+  async getRunEventsByDungeonRun(dungeonRunId: string): Promise<DatabaseResult<SummaryDetail[]>> {
     try {
       const { data, error } = await this.supabase
         .from('run_summaries_simple')
@@ -393,29 +410,18 @@ export class DatabaseService {
    * Get complete dungeon run data with logs and events
    */
   async getDungeonRunComplete(dungeonRunId: string): Promise<DatabaseResult<{
-    dungeonRun: DungeonRun;
-    runLogs: RunLog[];
-    events: RunEvent[];
+    summary: SummaryRun;
+    details: SummaryDetail[];
   }>> {
     try {
-      const [dungeonRunResult, runLogsResult, eventsResult] = await Promise.all([
+      const [summaryRes, detailsRes] = await Promise.all([
         this.getDungeonRun(dungeonRunId),
-        this.getRunLogsByDungeonRun(dungeonRunId),
         this.getRunEventsByDungeonRun(dungeonRunId)
       ]);
 
-      if (!dungeonRunResult.success) {
-        return { success: false, error: dungeonRunResult.error };
-      }
+      if (!summaryRes.success) return { success: false, error: summaryRes.error };
 
-      return {
-        success: true,
-        data: {
-          dungeonRun: dungeonRunResult.data!,
-          runLogs: runLogsResult.data || [],
-          events: eventsResult.data || []
-        }
-      };
+      return { success: true, data: { summary: summaryRes.data!, details: detailsRes.data || [] } };
     } catch (error) {
       logError({ operation: 'Get complete dungeon run', module: 'Database', details: { dungeonRunId } }, error);
       return { success: false, error: formatError(error) };

@@ -101,6 +101,15 @@ export const Api = {
   }): Promise<{ runId: string; status: string; message: string; }> {
     return http('/ui/dungeon/start', { method: 'POST', body: JSON.stringify(payload) });
   }
+  ,
+  listRuns(status?: string[]): Promise<any[]> {
+    const qs = status && status.length ? `?status=${encodeURIComponent(status.join(','))}` : '';
+    return http(`/ui/dungeon/runs${qs}`);
+  }
+  ,
+  getRun(id: string): Promise<{ summary: any; details: any[] }> {
+    return http(`/ui/dungeon/run/${id}`);
+  }
 };
 
 export function getBaseUrl() {

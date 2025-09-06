@@ -41,6 +41,8 @@ export function App() {
   const [dgModel, setDgModel] = useState(knownModels[0]);
   const [liveEvents, setLiveEvents] = useState<Record<string, any[]>>({});
   const [liveRuns, setLiveRuns] = useState<string[]>([]);
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+  const detailRef = React.useRef<HTMLDivElement | null>(null);
 
   // Load contexts and agents on boot
   useEffect(() => {
@@ -55,6 +57,20 @@ export function App() {
         const [ctx, ags] = await Promise.all([Api.listContexts(), Api.listAgents()]);
         setContexts(ctx && ctx.length ? ctx : fallbackContexts);
         setAgents(ags);
+        // Load existing runs (started/processing)
+        try {
+          const runs = await Api.listRuns(['started','processing']);
+          const ids = runs.map((r: any) => r.id).filter(Boolean);
+          if (ids.length) setLiveRuns(prev => Array.from(new Set([...ids, ...prev])));
+          const map: Record<string, any[]> = {};
+          for (const r of runs) {
+            const details = Array.isArray(r.details) ? r.details : [];
+            map[r.id] = details.map((d: any) => ({ type: d.event_type || d.type, timestamp: d.timestamp, ...d }));
+          }
+          setLiveEvents(prev => ({ ...map, ...prev }));
+        } catch (e: any) {
+          setError(`Runs load failed: ${e.message || e}`);
+        }
       } catch (e: any) {
         // Fallback contexts if API not reachable yet
         setContexts(fallbackContexts);
@@ -116,7 +132,19 @@ export function App() {
     } catch {
       // ignore
     }
-  }, []);
+  }, [apiUrl]);
+
+  // Autoscroll to latest event when selected run updates
+  useEffect(() => {
+    if (!selectedRunId) return;
+    const el = detailRef.current;
+    if (!el) return;
+    // small timeout to allow DOM to paint
+    const t = setTimeout(() => {
+      el.scrollTop = el.scrollHeight;
+    }, 50);
+    return () => clearTimeout(t);
+  }, [selectedRunId, liveEvents[selectedRunId || '']]);
 
   async function handleCreateAgent(form: FormData) {
     try {
@@ -426,20 +454,49 @@ export function App() {
           <div className="card" style={{ marginTop: 12 }}>
             <div style={{ fontWeight: 600, marginBottom: 8 }}>Live Runs</div>
             {liveRuns.length === 0 && <div style={{ color: '#666' }}>No runs yet.</div>}
-            {liveRuns.map(rid => (
-              <div key={rid} style={{ marginBottom: 10 }}>
-                <div style={{ fontWeight: 600 }}>{rid}</div>
-                <div className="messages" style={{ maxHeight: 220 }}>
-                  {(liveEvents[rid] || []).slice(-50).map((e, i) => (
-                    <div key={i} className={`msg assistant`}>
-                      <div className="meta">{e.type} · {new Date(e.timestamp || Date.now()).toLocaleTimeString()}</div>
-                      <div className="bubble"><code style={{ whiteSpace: 'pre-wrap' }}>{JSON.stringify(e)}</code></div>
-                    </div>
-                  ))}
+            {liveRuns.map(rid => {
+              const events = liveEvents[rid] || [];
+              const last = events[events.length - 1];
+              return (
+                <div key={rid} className="row" style={{ alignItems: 'center', marginBottom: 8 }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis' }}>{rid}</div>
+                    <div style={{ fontSize: 12, color: '#666' }}>{last ? `${last.type} · ${new Date(last.timestamp || Date.now()).toLocaleTimeString()}` : 'waiting...'}</div>
+                  </div>
+                  <div className="toolbar">
+                    <button className="btn" onClick={() => setSelectedRunId(rid)}>Open</button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {selectedRunId && (
+            <div className="card" style={{ marginTop: 12 }}>
+              <div className="row" style={{ alignItems: 'center' }}>
+                <div style={{ fontWeight: 600 }}>Run Detail</div>
+                <div style={{ color: '#666' }}>{selectedRunId}</div>
+                <div style={{ marginLeft: 'auto' }} className="toolbar">
+                  <button className="btn" onClick={() => { navigator.clipboard?.writeText(selectedRunId || ''); }}>Copy ID</button>
+                  <button className="btn btn-danger" onClick={() => {
+                    setLiveEvents(prev => ({ ...prev, [selectedRunId!]: [] }));
+                  }}>Clear</button>
+                  <button className="btn" onClick={() => setSelectedRunId(null)}>Close</button>
                 </div>
               </div>
-            ))}
-          </div>
+              <div className="messages" style={{ maxHeight: 380 }} ref={detailRef}>
+                {(liveEvents[selectedRunId] || []).map((e, i) => (
+                  <div key={i} className={`msg assistant`}>
+                    <div className="meta">{e.type} · {new Date(e.timestamp || Date.now()).toLocaleTimeString()}</div>
+                    <div className="bubble"><code style={{ whiteSpace: 'pre-wrap' }}>{JSON.stringify(e)}</code></div>
+                  </div>
+                ))}
+                {(liveEvents[selectedRunId] || []).length === 0 && (
+                  <div style={{ color: '#666' }}>No events yet for this run.</div>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

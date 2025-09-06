@@ -12,7 +12,7 @@ import {
 } from '../gigaverse/gigaverse.utils';
 import { DatabaseService } from '../../infrastructure/database/database.service';
 import { logError, logSuccess, throwError, formatError as formatErrorMessage } from '../../shared/utils/error.utils';
-import { CreateDungeonRunInput, RunLog } from '../../infrastructure/database/types';
+import { CreateDungeonRunInput } from '../../infrastructure/database/types';
 import { DaydreamsAgentService, RoomDecisionHistoryItem } from '../../infrastructure/ai/daydreams.agent';
 import { aiConfig } from '../../infrastructure/config/ai.config';
 
@@ -228,7 +228,7 @@ export class DungeonService {
    */
   private async executeSingleDungeonRun(
     dungeonRunId: string,
-    runLog: RunLog,
+    runLog: any,
     gameClient: GigaverseGameClient,
     context: string,
     params: {
@@ -344,17 +344,34 @@ export class DungeonService {
               (await import('../gigaverse/gigaverse.prompts')).buildLootInstruction(),
             ].join('\n');
             const modelIdLoot = llmModel || (await import('../../infrastructure/config/ai.config')).aiConfig.model;
-            const textLoot = await this.agent.decideText(modelIdLoot, system, compositeLoot);
-            const parsedLoot = (await import('../gigaverse/gigaverse.prompts')).parseLootFromText(textLoot || '');
-            await this.databaseService.logEvent(
-              dungeonRunId,
-              runLog.id,
-              'agent_decision_loot',
-              `Agent loot decision: ${parsedLoot.loot || 'invalid'}`,
-              { reason: parsedLoot.reason, raw: (textLoot || '').slice(0, 300) }
-            );
+            let parsedLoot: any = null;
+            let textLoot = '';
+            const MAX_ATTEMPTS_LOOT = 3;
+            for (let attempt = 1; attempt <= MAX_ATTEMPTS_LOOT; attempt++) {
+              try {
+                textLoot = await this.agent.decideText(modelIdLoot, system, compositeLoot);
+                parsedLoot = (await import('../gigaverse/gigaverse.prompts')).parseLootFromText(textLoot || '');
+                await this.databaseService.logEvent(
+                  dungeonRunId,
+                  runLog.id,
+                  'agent_decision_loot',
+                  `Agent loot decision (attempt ${attempt}/${MAX_ATTEMPTS_LOOT}): ${parsedLoot.loot || 'invalid'}`,
+                  { reason: parsedLoot.reason, raw: (textLoot || '').slice(0, 300) }
+                );
+                if (parsedLoot.loot) break;
+              } catch (e) {
+                await this.databaseService.logEvent(
+                  dungeonRunId,
+                  runLog.id,
+                  'agent_error',
+                  `Agent loot parsing error (attempt ${attempt}/${MAX_ATTEMPTS_LOOT})`,
+                  { phase: 'loot', error: String(e) }
+                );
+              }
+              if (attempt < MAX_ATTEMPTS_LOOT) await sleep(200);
+            }
 
-            if (!parsedLoot.loot) throw new Error('Failed to parse loot from agent response');
+            if (!parsedLoot?.loot) throw new Error('Failed to parse loot from agent response');
             lootChoice = parsedLoot.loot;
             lootChoices.push(lootChoice);
             roomDecisionHistory.push({ kind: 'loot', choice: lootChoice, reason: parsedLoot.reason || '' });
@@ -465,17 +482,34 @@ export class DungeonService {
               buildMoveInstruction(),
             ].join('\n');
             const modelIdMove = llmModel || (await import('../../infrastructure/config/ai.config')).aiConfig.model;
-            const textMove = await this.agent.decideText(modelIdMove, system, compositeMove);
-            const parsedMove = parseMoveFromText(textMove || '');
-            await this.databaseService.logEvent(
-              dungeonRunId,
-              runLog.id,
-              'agent_decision_move',
-              `Agent move decision: ${parsedMove.move || 'invalid'}`,
-              { reason: parsedMove.reason, raw: (textMove || '').slice(0, 300) }
-            );
+            let parsedMove: any = null;
+            let textMove = '';
+            const MAX_ATTEMPTS_MOVE = 3;
+            for (let attempt = 1; attempt <= MAX_ATTEMPTS_MOVE; attempt++) {
+              try {
+                textMove = await this.agent.decideText(modelIdMove, system, compositeMove);
+                parsedMove = parseMoveFromText(textMove || '');
+                await this.databaseService.logEvent(
+                  dungeonRunId,
+                  runLog.id,
+                  'agent_decision_move',
+                  `Agent move decision (attempt ${attempt}/${MAX_ATTEMPTS_MOVE}): ${parsedMove.move || 'invalid'}`,
+                  { reason: parsedMove.reason, raw: (textMove || '').slice(0, 300) }
+                );
+                if (parsedMove.move) break;
+              } catch (e) {
+                await this.databaseService.logEvent(
+                  dungeonRunId,
+                  runLog.id,
+                  'agent_error',
+                  `Agent move parsing error (attempt ${attempt}/${MAX_ATTEMPTS_MOVE})`,
+                  { phase: 'combat', error: String(e) }
+                );
+              }
+              if (attempt < MAX_ATTEMPTS_MOVE) await sleep(200);
+            }
 
-            if (!parsedMove.move) throw new Error('Failed to parse move from agent response');
+            if (!parsedMove?.move) throw new Error('Failed to parse move from agent response');
             move = parsedMove.move;
             moves.push(move);
             roomDecisionHistory.push({ kind: 'move', choice: move, reason: parsedMove.reason || '' });
