@@ -578,6 +578,8 @@ export class DungeonService {
           );
           
           await sleep(ACTION_DELAY_MS);
+          const prevEnemyHP = dungeonState.enemy?.health?.current ?? 0;
+          const prevRoomNum = dungeonState.currentRoom;
           const moveResponse = await gameClient.makeMove(move as any, dungeonId, moveData);
           
           if (!moveResponse.success) {
@@ -620,7 +622,7 @@ export class DungeonService {
           }
           
           const battleResult = dungeonState.lastBattleResult;
-          
+
           await this.databaseService.logEvent(
             dungeonRunId,
             runLog.id,
@@ -632,20 +634,25 @@ export class DungeonService {
               enemyHP: dungeonState.enemy.health.current
             }
           );
-          
+
+          // Track battle win/loss for the move itself (RPS), independent of room clear
           if (battleResult === 'win') {
             battlesWon++;
+          } else if (battleResult === 'lose') {
+            battlesLost++;
+          }
+
+          // Room is cleared when enemy HP reaches 0, not merely on a winning move
+          const enemyHPNow = dungeonState.enemy?.health?.current ?? 0;
+          if (enemyHPNow <= 0 && prevEnemyHP > 0) {
             roomsCleared++;
-            
             await this.databaseService.logEvent(
               dungeonRunId,
               runLog.id,
               'room_cleared',
-              `Room ${dungeonState.currentRoom} cleared! Moving to next room`,
-              { roomsCleared }
+              `Room ${prevRoomNum} cleared! Moving to next room`,
+              { roomsCleared, prevRoom: prevRoomNum }
             );
-          } else if (battleResult === 'lose') {
-            battlesLost++;
           }
         }
         

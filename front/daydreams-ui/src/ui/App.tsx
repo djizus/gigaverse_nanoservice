@@ -37,7 +37,7 @@ export function App() {
   const [dgDungeonId, setDgDungeonId] = useState(1);
   const [dgRuns, setDgRuns] = useState(1);
   const [dgJuiced, setDgJuiced] = useState(false);
-  const [dgContext, setDgContext] = useState('Be aggressive in combat.\nPrioritize attack and armor upgrades when looting.\nHeal when low on health.');
+  const [dgContext, setDgContext] = useState('Be aggressive in combat.\nPrioritize attack and armor upgrades when looting, but loot heal when you are below 50% health.');
   const [dgModel, setDgModel] = useState(knownModels[0]);
   const [liveEvents, setLiveEvents] = useState<Record<string, any[]>>({});
   const [liveRuns, setLiveRuns] = useState<string[]>([]);
