@@ -4,15 +4,25 @@ import { DaydreamsAgentService } from '../../infrastructure/ai/daydreams.agent';
 import { AgentService } from '../services/agent.service';
 import { ContextRegistryService } from '../services/context-registry.service';
 import { CreateAgentInput } from '../types/agent';
+import { HybridAgentAdapter } from '../services/hybrid-agent.adapter';
+import { AgentRegistry } from '../../infrastructure/agents/agent-registry';
 
 export interface DaydreamsDeps {
   agentService: AgentService;
   contextRegistry: ContextRegistryService;
   daydreamsLLM: DaydreamsAgentService;
+  // Optional: New hybrid system
+  agentRegistry?: AgentRegistry;
 }
 
 export const createDaydreamsRoutes = (deps: DaydreamsDeps) => {
   const app = new Hono();
+  
+  // Initialize hybrid adapter if new system is available
+  const hybridAdapter = deps.agentRegistry ? new HybridAgentAdapter({ 
+    agentRegistry: deps.agentRegistry,
+    useNewSystem: true 
+  }) : null;
 
   // Contexts
   app.get('/daydreams/contexts', (c) => {
@@ -67,6 +77,47 @@ export const createDaydreamsRoutes = (deps: DaydreamsDeps) => {
       return c.json({ error: err?.message || 'Failed to create agent' }, 500);
     }
   });
+  
+  // NEW: Simple agent creation using hybrid system
+  app.post('/daydreams/agents/simple', async (c) => {
+    if (!hybridAdapter) {
+      return c.json({ error: 'Hybrid system not available' }, 503);
+    }
+    
+    try {
+      const body = await c.req.json();
+      const { name, instructions, context, model, routerApiKey } = body;
+      
+      if (!name) {
+        return c.json({ error: 'Agent name is required' }, 400);
+      }
+      
+      console.log(`[Daydreams][Simple] Creating agent: ${name}`);
+      
+      const agent = await hybridAdapter.createAgentWithRegistry({
+        name,
+        model: model || 'google-vertex/gemini-2.5-flash',
+        context: context || 'chat',
+        instructions: instructions || `You are ${name}, a helpful assistant.`,
+        routerApiKey,
+      });
+      
+      const providerStatus = hybridAdapter.getProviderStatus(agent.id);
+      
+      return c.json({
+        ...agent,
+        system: 'hybrid-registry',
+        providerStatus,
+      }, 201);
+      
+    } catch (err: any) {
+      console.error('[Daydreams][Simple] Create agent error:', err);
+      return c.json({ 
+        error: err?.message || 'Failed to create agent',
+        system: 'hybrid-registry'
+      }, 500);
+    }
+  });
 
   app.get('/daydreams/agents/:id', async (c) => {
     try {
@@ -114,6 +165,62 @@ export const createDaydreamsRoutes = (deps: DaydreamsDeps) => {
     } catch (err: any) {
       console.error('[Daydreams] send message error:', err);
       return c.json({ error: err?.message || 'Failed to send message' }, 500);
+    }
+  });
+  
+  // NEW: Simple message sending using hybrid system
+  app.post('/daydreams/agents/:id/send/simple', async (c) => {
+    if (!hybridAdapter) {
+      return c.json({ error: 'Hybrid system not available' }, 503);
+    }
+    
+    try {
+      const id = c.req.param('id');
+      console.log(`[Daydreams][Simple] POST /daydreams/agents/${id}/send/simple`);
+      
+      const body = await c.req.json();
+      const { message, sessionId, context, args } = body;
+      
+      if (!message) {
+        return c.json({ error: 'message is required' }, 400);
+      }
+      
+      // Check if agent exists in new system first
+      if (!(await hybridAdapter.hasAgentInRegistry(id))) {
+        return c.json({ error: 'Agent not found in hybrid registry' }, 404);
+      }
+      
+      const result = await hybridAdapter.sendMessageWithRegistry(id, message, {
+        sessionId,
+        context,
+        args,
+      });
+      
+      return c.json({
+        sessionId: result.sessionId,
+        response: result.reply.content,
+        system: 'hybrid-registry',
+      });
+      
+    } catch (err: any) {
+      console.error('[Daydreams][Simple] Send message error:', err);
+      
+      if (err?.message?.includes('not found')) {
+        return c.json({ error: err.message, system: 'hybrid-registry' }, 404);
+      }
+      
+      if (err?.message?.includes('Payment required')) {
+        return c.json({ 
+          error: err.message, 
+          code: 'PaymentRequired',
+          system: 'hybrid-registry'
+        }, 402);
+      }
+      
+      return c.json({ 
+        error: err?.message || 'Failed to send message',
+        system: 'hybrid-registry' 
+      }, 500);
     }
   });
 

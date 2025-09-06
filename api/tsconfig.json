@@ -22,11 +22,13 @@
   "include": [
     "src/**/*",
     "server.ts",
-    "client.ts"
+    "client.ts",
+    "tsconfig.json",
+    "index.ts",
+    "test-agents.ts",
+    "test-dungeon.ts",
+    "test-hybrid-system.ts",
+    "test-nano-services.ts"
   ],
-  "exclude": [
-    "node_modules",
-    "dist",
-    "server.old.ts"
-  ]
+  "exclude": ["node_modules", "dist", "server.old.ts"]
 }

@@ -14,6 +14,7 @@ import { createDaydreamsRoutes } from '../daydreams/routes/daydreams.routes';
 import { SupabaseConfig } from '../infrastructure/config/env.config';
 import { DaydreamsAgentService } from '../infrastructure/ai/daydreams.agent';
 import { aiConfig } from '../infrastructure/config/ai.config';
+import { AgentRegistry } from '../infrastructure/agents/agent-registry';
 
 export interface AppDeps {
   paymentConfig: PaymentConfig;
@@ -61,6 +62,10 @@ export async function createApp(deps: AppDeps) {
   }
   console.log(`🧰 Daydreams storage: ${useMemory ? 'memory' : 'supabase'}`);
 
+  // New Agent Registry (hybrid approach)
+  const agentRegistry = new AgentRegistry();
+  console.log(`🤖 Agent Registry initialized (hybrid architecture)`);
+
   // Routes
   const app = new Hono();
 
@@ -87,7 +92,15 @@ export async function createApp(deps: AppDeps) {
   }));
   app.route('/', createHealthRoutes());
   app.route('/', createGameRoutes(dungeonController, deps.paymentConfig, databaseService));
-  app.route('/', createDaydreamsRoutes({ agentService, contextRegistry, daydreamsLLM: daydreamsAgent }));
+  app.route('/', createDaydreamsRoutes({ 
+    agentService, 
+    contextRegistry, 
+    daydreamsLLM: daydreamsAgent,
+    agentRegistry // Enable hybrid system
+  }));
+  
+  // Nano services using existing daydreams routes
+  console.log(`🔗 Nano services available via /daydreams/* endpoints`);
 
   return app;
 }

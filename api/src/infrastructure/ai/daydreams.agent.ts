@@ -199,12 +199,55 @@ export class DaydreamsAgentService {
     opts?: { temperature?: number; signal?: AbortSignal }
   ) {
     const rt: any = this.getRuntime(agentId);
+    const agent = this.agents.get(agentId);
+    
+    // FORCE direct API for ALL models to avoid runtime message format issues
+    // The Daydreams Core runtime adds system role messages that break Anthropic API
+    const forceDirectAPI = true;
+    const isAnthropicModel = aiConfig.model.includes('anthropic') || aiConfig.model.includes('claude');
+    
+    if (!rt || isAnthropicModel || forceDirectAPI) {
+      console.log(`[DaydreamsAgentService] Using direct API for agent ${agentId} (forced: ${forceDirectAPI}, anthropic: ${isAnthropicModel})`);
+      
+      if (!this.modelProvider) {
+        const err: any = new Error('Router not initialized');
+        err.statusCode = 402;
+        err.code = 'PaymentRequired';
+        throw err;
+      }
+      
+      const system = agent?.instructions || '';
+      const composed = [
+        request.context ? `Context: ${JSON.stringify(request.context)}` : '',
+        request.args ? `Args: ${JSON.stringify(request.args)}` : '',
+        `Input: ${request.input}`,
+      ].filter(Boolean).join('\n');
+      
+      try {
+        console.log(`[DaydreamsAgentService] Sending to ${aiConfig.model} with system prompt (bypassing runtime)`);
+        const { text } = await generateText({
+          model: this.modelProvider(aiConfig.model),
+          system,
+          prompt: composed,
+          temperature: opts?.temperature ?? 0.2,
+          signal: opts?.signal,
+        });
+        return text;
+      } catch (error: any) {
+        console.error(`[DaydreamsAgentService] Direct API error:`, error);
+        throw error;
+      }
+    }
+    
     if (!rt) {
       const err: any = new Error(`Runtime not registered for agent ${agentId}`);
       err.statusCode = 404;
       err.code = 'RuntimeNotFound';
       throw err;
     }
+    
+    // Use runtime for non-Anthropic models
+    console.log(`[DaydreamsAgentService] Using runtime for agent ${agentId} with model ${aiConfig.model}`);
     if (typeof rt.send === 'function') {
       const res: any = await rt.send({
         context: request.context,
@@ -218,13 +261,8 @@ export class DaydreamsAgentService {
       if (res?.message) return String(res.message);
       return typeof res?.content === 'string' ? res.content : JSON.stringify(res);
     }
-    if (!this.modelProvider) {
-      const err: any = new Error('Router not initialized');
-      err.statusCode = 402;
-      err.code = 'PaymentRequired';
-      throw err;
-    }
-    const agent = this.agents.get(agentId);
+    
+    // Final fallback
     const system = agent?.instructions || '';
     const composed = [
       request.context ? `Context: ${JSON.stringify(request.context)}` : '',
@@ -247,12 +285,55 @@ export class DaydreamsAgentService {
     opts?: { temperature?: number; signal?: AbortSignal }
   ): Promise<AsyncIterable<string>> {
     const rt: any = this.getRuntime(agentId);
+    const agent = this.agents.get(agentId);
+    
+    // FORCE direct API for ALL models to avoid runtime message format issues
+    // The Daydreams Core runtime adds system role messages that break Anthropic API
+    const forceDirectAPI = true;
+    const isAnthropicModel = aiConfig.model.includes('anthropic') || aiConfig.model.includes('claude');
+    
+    if (!rt || isAnthropicModel || forceDirectAPI) {
+      console.log(`[DaydreamsAgentService] Using direct API stream for agent ${agentId} (forced: ${forceDirectAPI}, anthropic: ${isAnthropicModel})`);
+      
+      if (!this.modelProvider) {
+        const err: any = new Error('Router not initialized');
+        err.statusCode = 402;
+        err.code = 'PaymentRequired';
+        throw err;
+      }
+      
+      const system = agent?.instructions || '';
+      const composed = [
+        request.context ? `Context: ${JSON.stringify(request.context)}` : '',
+        request.args ? `Args: ${JSON.stringify(request.args)}` : '',
+        `Input: ${request.input}`,
+      ].filter(Boolean).join('\n');
+      
+      try {
+        console.log(`[DaydreamsAgentService] Streaming to ${aiConfig.model} with system prompt (bypassing runtime)`);
+        const result = await streamText({
+          model: this.modelProvider(aiConfig.model),
+          system,
+          prompt: composed,
+          temperature: opts?.temperature ?? 0.2,
+          signal: opts?.signal,
+        });
+        return result.textStream;
+      } catch (error: any) {
+        console.error(`[DaydreamsAgentService] Direct API stream error:`, error);
+        throw error;
+      }
+    }
+    
     if (!rt) {
       const err: any = new Error(`Runtime not registered for agent ${agentId}`);
       err.statusCode = 404;
       err.code = 'RuntimeNotFound';
       throw err;
     }
+    
+    // Use runtime for non-Anthropic models
+    console.log(`[DaydreamsAgentService] Using runtime stream for agent ${agentId} with model ${aiConfig.model}`);
     if (typeof rt.stream === 'function') {
       return rt.stream({
         context: request.context,
@@ -262,13 +343,8 @@ export class DaydreamsAgentService {
         signal: opts?.signal,
       });
     }
-    if (!this.modelProvider) {
-      const err: any = new Error('Router not initialized');
-      err.statusCode = 402;
-      err.code = 'PaymentRequired';
-      throw err;
-    }
-    const agent = this.agents.get(agentId);
+    
+    // Final fallback
     const system = agent?.instructions || '';
     const composed = [
       request.context ? `Context: ${JSON.stringify(request.context)}` : '',
@@ -287,27 +363,36 @@ export class DaydreamsAgentService {
 
   // Register runtime using per-agent API key (does not rely on global provider)
   registerAgentWithApiKey(agent: Pick<AgentConfig, 'id' | 'name' | 'context' | 'instructions'>, apiKey: string) {
-    const system = agent.instructions || `You are ${agent.name}, a helpful assistant for context '${agent.context}'.`;
-    const provider = createDreamsRouter({ apiKey });
-    const runtime = createDreams({
-      model: provider(aiConfig.model),
-      contexts: [],
-      inputs: {},
-      outputs: {},
-      extensions: [],
-      logLevel: LogLevel.INFO,
-    });
-    this.runtimes.set(agent.id, runtime);
-    this.agents.set(agent.id, {
-      id: agent.id,
-      name: agent.name,
-      model: aiConfig.model,
-      context: agent.context,
-      instructions: agent.instructions,
-      status: 'active',
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    } as AgentConfig);
+    console.log(`[DaydreamsAgentService] Registering agent ${agent.id} with custom API key`);
+    
+    try {
+      const system = agent.instructions || `You are ${agent.name}, a helpful assistant for context '${agent.context}'.`;
+      const provider = createDreamsRouter({ apiKey });
+      const runtime = createDreams({
+        model: provider(aiConfig.model),
+        contexts: [],
+        inputs: {},
+        outputs: {},
+        extensions: [],
+        logLevel: LogLevel.INFO,
+      });
+      this.runtimes.set(agent.id, runtime);
+      this.agents.set(agent.id, {
+        id: agent.id,
+        name: agent.name,
+        model: aiConfig.model,
+        context: agent.context,
+        instructions: agent.instructions,
+        status: 'active',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      } as AgentConfig);
+      
+      console.log(`[DaydreamsAgentService] Successfully registered agent ${agent.id} with custom API key`);
+    } catch (error: any) {
+      console.error(`[DaydreamsAgentService] Failed to register agent ${agent.id} with API key:`, error);
+      throw error;
+    }
   }
 
   getRegisteredAgent(agentId: string): AgentConfig | undefined {
