@@ -28,14 +28,10 @@ async function testDungeonEndpoint() {
     console.log("✅ Health:", health);
     const agentHealth = health?.daydreamsAgent || {};
     console.log("🧠 Daydreams Agent:", agentHealth);
-    if (process.env.USE_DAYDREAMS_AGENT === 'true') {
-      if (!agentHealth.enabled) {
-        console.error("❌ Agent expected enabled but /health reports disabled. Check DREAMS_ROUTER_API_KEY and USE_DAYDREAMS_AGENT.");
-        process.exit(1);
-      }
-      console.log(`🔧 Agent Model: ${agentHealth.model} | Timeout: ${agentHealth.timeoutMs}ms`);
-    } else {
-      console.log("ℹ️  Agent is disabled by config (USE_DAYDREAMS_AGENT!=true)");
+    console.log(`🔧 Agent Enabled: ${agentHealth.enabled} | Model: ${agentHealth.model} | Timeout: ${agentHealth.timeoutMs}ms`);
+    if (!agentHealth.enabled) {
+      console.error("❌ Daydreams agent is disabled. Set DREAMS_ROUTER_API_KEY to enable decisions.");
+      process.exit(1);
     }
     console.log();
 

@@ -11,8 +11,7 @@ export const createHealthRoutes = () => {
       service: "Game Activities Nano Service",
       timestamp: new Date().toISOString(),
       daydreamsAgent: {
-        enabled: true,
-        configured: aiConfig.enabled && !!aiConfig.apiKey,
+        enabled: !!aiConfig.apiKey,
         model: aiConfig.model,
         timeoutMs: aiConfig.timeoutMs,
       },

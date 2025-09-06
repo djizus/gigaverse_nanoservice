@@ -30,7 +30,7 @@ export async function createApp(deps: AppDeps) {
   if (daydreamsAgent.isEnabled) {
     console.log(`🧠 Daydreams Agent enabled (model: ${aiConfig.model})`);
   } else {
-    console.log(`🧠 Daydreams Agent enabled (fallback echo mode: no API key)`);
+    console.log(`🧠 Daydreams Agent disabled (no API key)`);
   }
   const dungeonService = new DungeonService(databaseService, daydreamsAgent);
   await dungeonService.initialize();

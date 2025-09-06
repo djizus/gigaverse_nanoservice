@@ -9,10 +9,8 @@ dotenvConfig();
 async function testAuthentication() {
   console.log('🔍 Debugging Dreams Router Authentication\n');
   
-  console.log('Environment Variables:');
+  console.log('Environment:');
   console.log(`  DREAMS_ROUTER_API_KEY: ${process.env.DREAMS_ROUTER_API_KEY ? 'SET (length: ' + process.env.DREAMS_ROUTER_API_KEY.length + ')' : 'NOT SET'}`);
-  console.log(`  DREAMS_MODEL: ${process.env.DREAMS_MODEL || 'default (google-vertex/gemini-2.5-flash)'}`);
-  console.log(`  USE_DAYDREAMS_AGENT: ${process.env.USE_DAYDREAMS_AGENT || 'true'}`);
   
   if (!process.env.DREAMS_ROUTER_API_KEY) {
     console.log('\n❌ DREAMS_ROUTER_API_KEY is not set!');

@@ -15,9 +15,9 @@ export const defaultDreamsConfig: DreamsConfig = {
     address: process.env.ADDRESS,
   },
   
-  // Model settings
-  model: process.env.DREAMS_MODEL || 'google-vertex/gemini-1.5-flash',
-  timeoutMs: Number(process.env.DREAMS_TIMEOUT_MS || 30000),
+  // Model settings (default; UI can override per agent)
+  model: 'google-vertex/gemini-2.5-flash',
+  timeoutMs: 8000,
   temperature: Number(process.env.DREAMS_TEMPERATURE || 0.2),
 };
 

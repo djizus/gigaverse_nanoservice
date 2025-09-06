@@ -247,9 +247,9 @@ You can customize:
 - Smart detection of different dungeon conflicts
 
 ### Daydreams Agent Mode
-- Enable with `USE_DAYDREAMS_AGENT=true` and set `DREAMS_ROUTER_API_KEY`.
-- Model default: `google-vertex/gemini-2.5-flash` (override with `DAYDREAMS_MODEL`).
-- Timeout default: `2000ms` (override with `DAYDREAMS_TIMEOUT_MS`).
+- Enable by setting `DREAMS_ROUTER_API_KEY`.
+- Default model: `google-vertex/gemini-2.5-flash` (UI can select a different model).
+- Fixed timeout: `8000ms`.
 - Behavior: If the agent is disabled, times out, or returns invalid output, the run fails immediately (no fallback).
 - Health: `/health` includes agent `enabled`, `model`, and `timeoutMs`.
 - **Combat Strategy**: Smart rock/paper/scissors based on enemy patterns  

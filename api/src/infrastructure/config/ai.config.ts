@@ -1,7 +1,3 @@
-import { config as dotenvConfig } from 'dotenv';
-
-dotenvConfig();
-
 export interface AiConfig {
   enabled: boolean;
   apiKey: string | undefined;
@@ -10,9 +6,11 @@ export interface AiConfig {
 }
 
 export const aiConfig: AiConfig = {
-  // Default to enabled unless explicitly disabled
-  enabled: process.env.USE_DAYDREAMS_AGENT !== 'false',
+  // Always consider agent feature enabled; runtime requires API key
+  enabled: true,
   apiKey: process.env.DREAMS_ROUTER_API_KEY,
-  model: process.env.DAYDREAMS_MODEL || 'google-vertex/gemini-1.5-flash',
-  timeoutMs: Number(process.env.DAYDREAMS_TIMEOUT_MS || 2000),
+  // Default model; UI can override per request/agent
+  model: 'google-vertex/gemini-2.5-flash',
+  // Fixed timeout (ms), not env-driven
+  timeoutMs: 8000,
 };

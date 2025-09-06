@@ -3,6 +3,11 @@ import { Api, getBaseUrl, setBaseUrl } from '../api';
 import type { AgentConfig, Message, Session } from '../types';
 
 export function App() {
+  const [theme, setTheme] = useState<'light'|'dark'>(() => {
+    const saved = localStorage.getItem('theme');
+    if (saved === 'light' || saved === 'dark') return saved;
+    return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  });
   const [apiUrl, setApiUrl] = useState<string>(getBaseUrl());
   const [contexts, setContexts] = useState<string[]>([]);
   const [agents, setAgents] = useState<AgentConfig[]>([]);
@@ -14,9 +19,24 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [streaming, setStreaming] = useState(true);
   const knownModels = [
-    'anthropic/claude-opus-4-20250514',
+    // Default first
+    'google-vertex/gemini-2.5-flash',
+    // Supported list
+    'openai/gpt-4-turbo',
+    'google-vertex/gemini-2.5-pro',
+    'anthropic/claude-sonnet-4-20250514',
+    'xai/grok-4-0709',
+    'openai/gpt-5',
+    'openai/gpt-4o-mini',
+    'chutes/deepseek-v3.1',
   ];
   const fallbackContexts = ['gigaverse', 'chat'];
+
+  // Load contexts and agents on boot
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem('theme', theme);
+  }, [theme]);
 
   // Load contexts and agents on boot
   useEffect(() => {
@@ -212,8 +232,8 @@ export function App() {
             </div>
           </div>
           <div className="toolbar" style={{ marginTop: 8 }}>
-            <button onClick={() => setSelectedAgent(a)}>Open</button>
-            <button onClick={() => handleDeleteAgent(a)}>Delete</button>
+            <button className="btn" onClick={() => setSelectedAgent(a)}>Open</button>
+            <button className="btn btn-danger" onClick={() => handleDeleteAgent(a)}>Delete</button>
           </div>
         </div>
       ))}
@@ -231,7 +251,7 @@ export function App() {
           <option key={s.id} value={s.id}>{s.title || s.id.slice(0, 8)} · {new Date(s.createdAt).toLocaleString()}</option>
         ))}
       </select>
-      <button onClick={() => setSelectedSession(null)}>Reset</button>
+      <button className="btn" onClick={() => setSelectedSession(null)}>Reset</button>
     </div>
   );
 
@@ -239,6 +259,7 @@ export function App() {
     <div>
       <div className="header">
         <strong>Daydreams Agents UI</strong>
+        <button className="btn" onClick={() => setTheme(t => t==='dark'?'light':'dark')}>{theme==='dark' ? '☀️ Light' : '🌙 Dark'}</button>
         <span style={{ color: '#666' }}>API:</span>
         <input style={{ width: 320 }} value={apiUrl} onChange={(e) => { setApiUrl(e.target.value); setBaseUrl(e.target.value); }} />
         <span style={{ color: '#666' }}>Contexts:</span>
@@ -251,29 +272,35 @@ export function App() {
           <div className="card" style={{ marginBottom: 12 }}>
             <form onSubmit={(e) => { e.preventDefault(); handleCreateAgent(new FormData(e.currentTarget)); e.currentTarget.reset(); }}>
               <div style={{ fontWeight: 600, marginBottom: 8 }}>Create Agent</div>
-              <div style={{ marginBottom: 6 }}>
-                <input name="name" placeholder="Name" defaultValue="Gigaverse Agent" />
+              <div style={{ marginBottom: 8 }}>
+                <label htmlFor="name">Name</label>
+                <input id="name" name="name" placeholder="Name" defaultValue="Gigaverse Agent" />
               </div>
-              <div className="row" style={{ marginBottom: 6 }}>
+              <div className="row" style={{ marginBottom: 8 }}>
                 <div>
-                  <input name="model" placeholder="Model (e.g. gpt-4o-mini)" defaultValue={knownModels[0]} list="models" />
-                  <datalist id="models">
-                    {knownModels.map(m => <option key={m} value={m} />)}
-                  </datalist>
+                  <label htmlFor="model">Model</label>
+                  <select id="model" name="model" defaultValue={knownModels[0]}>
+                    {knownModels.map(m => <option key={m} value={m}>{m}</option>)}
+                  </select>
                 </div>
-                <select name="context" defaultValue={(contexts.find(c => c==='gigaverse') ?? contexts[0] ?? 'gigaverse')}>
-                  {(contexts.length ? contexts : fallbackContexts).map(c => <option key={c} value={c}>{c}</option>)}
-                </select>
+                <div>
+                  <label htmlFor="context">Context</label>
+                  <select id="context" name="context" defaultValue={(contexts.find(c => c==='gigaverse') ?? contexts[0] ?? 'gigaverse')}>
+                    {(contexts.length ? contexts : fallbackContexts).map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </div>
               </div>
-              <div style={{ marginBottom: 6 }}>
-                <input name="description" placeholder="Description (optional)" defaultValue="Gigaverse tactical assistant" />
+              <div style={{ marginBottom: 8 }}>
+                <label htmlFor="description">Description</label>
+                <input id="description" name="description" placeholder="Description (optional)" defaultValue="Gigaverse tactical assistant" />
               </div>
-              <div style={{ marginBottom: 6 }}>
-                <textarea name="instructions" placeholder="Instructions (optional)" defaultValue="You assist with Gigaverse gameplay, dungeon strategies and agent tasks. Be concise, helpful, and contextual."></textarea>
+              <div style={{ marginBottom: 8 }}>
+                <label htmlFor="instructions">Instructions</label>
+                <textarea id="instructions" name="instructions" placeholder="Instructions (optional)" style={{ minHeight: 140 }} defaultValue="You assist with Gigaverse gameplay, dungeon strategies and agent tasks. Be concise, helpful, and contextual."></textarea>
               </div>
-              <div>
-                <button className="primary" type="submit">Create</button>
-                <button type="button" style={{ marginLeft: 8 }} onClick={ensureGigaverseAgent}>Quick: Base Gigaverse Agent</button>
+              <div className="row">
+                <button className="btn btn-primary" type="submit">Create</button>
+                <button className="btn btn-secondary" type="button" onClick={ensureGigaverseAgent}>Quick: Base Gigaverse Agent</button>
               </div>
             </form>
           </div>
@@ -318,7 +345,7 @@ function MessageInput({ onSend, disabled, streaming, onToggleStreaming }: { onSe
           <input type="checkbox" checked={streaming} onChange={(e) => onToggleStreaming(e.target.checked)} />
           Stream
         </label>
-        <button className="primary" type="submit" disabled={disabled}>Send</button>
+        <button className="btn btn-primary" type="submit" disabled={disabled}>Send</button>
       </div>
     </form>
   );

@@ -210,7 +210,7 @@ async function main() {
         process.env.DREAMS_ROUTER_API_KEY ? "SET" : "NOT SET"
       }`
     );
-    console.log(`  DREAMS_MODEL: ${process.env.DREAMS_MODEL || "default"}`);
+    console.log(`  Default Model: google-vertex/gemini-2.5-flash`);
     console.log("");
 
     await testConfiguration();

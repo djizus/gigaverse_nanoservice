@@ -25,6 +25,7 @@ pnpm-debug.log*
 **/.env.test.local
 **/.env.production.local
 **/.env.production
+api/.env
 
 # Database files
 *.sqlite
@@ -87,6 +88,8 @@ temp/
 
 # Fun folder (reference project)
 fun/
+old/fun/
+old/agent-gmx/
 
 # TypeScript
 *.tsbuildinfo

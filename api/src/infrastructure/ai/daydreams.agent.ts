@@ -85,10 +85,7 @@ export class DaydreamsAgentService {
       return rt.send({ input: opts.prompt, temperature: opts.temperature, signal: opts.signal });
     }
     const system = opts.system || agent.instructions || `You are ${agent.name}, a helpful assistant for context '${agent.context}'.`;
-    const modelId = aiConfig.model; // enforce configured model
-    if (agent.model && agent.model !== modelId) {
-      console.warn(`[DaydreamsAgentService] generateTextForAgent: overriding agent.model='${agent.model}' -> '${modelId}'`);
-    }
+    const modelId = agent.model || aiConfig.model;
     try {
       const { text } = await generateText({ model: this.modelProvider(modelId), system, prompt: opts.prompt, temperature: opts.temperature ?? 0.2, signal: opts.signal });
       return text;
@@ -126,10 +123,7 @@ export class DaydreamsAgentService {
       return { textStream };
     }
     const system = opts.system || agent.instructions || `You are ${agent.name}, a helpful assistant for context '${agent.context}'.`;
-    const modelId = aiConfig.model; // enforce configured model
-    if (agent.model && agent.model !== modelId) {
-      console.warn(`[DaydreamsAgentService] streamTextForAgent: overriding agent.model='${agent.model}' -> '${modelId}'`);
-    }
+    const modelId = agent.model || aiConfig.model;
     try {
       const result = await streamText({ model: this.modelProvider(modelId), system, prompt: opts.prompt, temperature: opts.temperature ?? 0.2, signal: opts.signal });
       return { textStream: result.textStream };
@@ -151,10 +145,7 @@ export class DaydreamsAgentService {
   registerAgent(agent: Pick<AgentConfig, 'id' | 'model' | 'name' | 'context' | 'instructions'>) {
     if (!this.modelProvider) return;
     const system = agent.instructions || `You are ${agent.name}, a helpful assistant for context '${agent.context}'.`;
-    const modelId = aiConfig.model; // enforce configured model
-    if (agent.model && agent.model !== modelId) {
-      console.warn(`[DaydreamsAgentService] registerAgent: overriding agent.model='${agent.model}' -> '${modelId}'`);
-    }
+    const modelId = agent.model || aiConfig.model;
 
     const runtime = createDreams({
       model: this.modelProvider(modelId),
@@ -170,7 +161,7 @@ export class DaydreamsAgentService {
     this.agents.set(agent.id, {
       id: agent.id,
       name: agent.name,
-      model: agent.model || aiConfig.model,
+      model: modelId,
       context: agent.context,
       instructions: agent.instructions,
       status: 'active',
@@ -204,7 +195,8 @@ export class DaydreamsAgentService {
     // FORCE direct API for ALL models to avoid runtime message format issues
     // The Daydreams Core runtime adds system role messages that break Anthropic API
     const forceDirectAPI = true;
-    const isAnthropicModel = aiConfig.model.includes('anthropic') || aiConfig.model.includes('claude');
+    const currentModel = agent?.model || aiConfig.model;
+    const isAnthropicModel = currentModel.includes('anthropic') || currentModel.includes('claude');
     
     if (!rt || isAnthropicModel || forceDirectAPI) {
       console.log(`[DaydreamsAgentService] Using direct API for agent ${agentId} (forced: ${forceDirectAPI}, anthropic: ${isAnthropicModel})`);
@@ -224,9 +216,9 @@ export class DaydreamsAgentService {
       ].filter(Boolean).join('\n');
       
       try {
-        console.log(`[DaydreamsAgentService] Sending to ${aiConfig.model} with system prompt (bypassing runtime)`);
+        console.log(`[DaydreamsAgentService] Sending to ${currentModel} with system prompt (bypassing runtime)`);
         const { text } = await generateText({
-          model: this.modelProvider(aiConfig.model),
+          model: this.modelProvider(currentModel),
           system,
           prompt: composed,
           temperature: opts?.temperature ?? 0.2,
@@ -247,7 +239,7 @@ export class DaydreamsAgentService {
     }
     
     // Use runtime for non-Anthropic models
-    console.log(`[DaydreamsAgentService] Using runtime for agent ${agentId} with model ${aiConfig.model}`);
+    console.log(`[DaydreamsAgentService] Using runtime for agent ${agentId} with model ${currentModel}`);
     if (typeof rt.send === 'function') {
       const res: any = await rt.send({
         context: request.context,
@@ -270,7 +262,7 @@ export class DaydreamsAgentService {
       `Input: ${request.input}`,
     ].filter(Boolean).join('\n');
     const { text } = await generateText({
-      model: this.modelProvider(aiConfig.model),
+      model: this.modelProvider(currentModel),
       system,
       prompt: composed,
       temperature: opts?.temperature ?? 0.2,
@@ -290,7 +282,8 @@ export class DaydreamsAgentService {
     // FORCE direct API for ALL models to avoid runtime message format issues
     // The Daydreams Core runtime adds system role messages that break Anthropic API
     const forceDirectAPI = true;
-    const isAnthropicModel = aiConfig.model.includes('anthropic') || aiConfig.model.includes('claude');
+    const currentModel = agent?.model || aiConfig.model;
+    const isAnthropicModel = currentModel.includes('anthropic') || currentModel.includes('claude');
     
     if (!rt || isAnthropicModel || forceDirectAPI) {
       console.log(`[DaydreamsAgentService] Using direct API stream for agent ${agentId} (forced: ${forceDirectAPI}, anthropic: ${isAnthropicModel})`);
@@ -310,9 +303,9 @@ export class DaydreamsAgentService {
       ].filter(Boolean).join('\n');
       
       try {
-        console.log(`[DaydreamsAgentService] Streaming to ${aiConfig.model} with system prompt (bypassing runtime)`);
+        console.log(`[DaydreamsAgentService] Streaming to ${currentModel} with system prompt (bypassing runtime)`);
         const result = await streamText({
-          model: this.modelProvider(aiConfig.model),
+          model: this.modelProvider(currentModel),
           system,
           prompt: composed,
           temperature: opts?.temperature ?? 0.2,
@@ -333,7 +326,7 @@ export class DaydreamsAgentService {
     }
     
     // Use runtime for non-Anthropic models
-    console.log(`[DaydreamsAgentService] Using runtime stream for agent ${agentId} with model ${aiConfig.model}`);
+    console.log(`[DaydreamsAgentService] Using runtime stream for agent ${agentId} with model ${currentModel}`);
     if (typeof rt.stream === 'function') {
       return rt.stream({
         context: request.context,
@@ -352,7 +345,7 @@ export class DaydreamsAgentService {
       `Input: ${request.input}`,
     ].filter(Boolean).join('\n');
     const result = await streamText({
-      model: this.modelProvider(aiConfig.model),
+      model: this.modelProvider(currentModel),
       system,
       prompt: composed,
       temperature: opts?.temperature ?? 0.2,
