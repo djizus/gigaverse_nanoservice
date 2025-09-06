@@ -87,6 +87,20 @@ export const Api = {
       }
     }
   }
+  ,
+  startDungeon(payload: {
+    context: string;
+    playerAddress: string;
+    gigaverseToken: string;
+    totalRuns: number;
+    dungeonId: number;
+    isJuiced?: boolean;
+    consumables?: any[];
+    gearInstanceIds?: string[];
+    llmModel?: string;
+  }): Promise<{ runId: string; status: string; message: string; }> {
+    return http('/ui/dungeon/start', { method: 'POST', body: JSON.stringify(payload) });
+  }
 };
 
 export function getBaseUrl() {

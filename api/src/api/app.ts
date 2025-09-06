@@ -15,6 +15,8 @@ import { SupabaseConfig } from '../infrastructure/config/env.config';
 import { DaydreamsAgentService } from '../infrastructure/ai/daydreams.agent';
 import { aiConfig } from '../infrastructure/config/ai.config';
 import { AgentRegistry } from '../infrastructure/agents/agent-registry';
+import { createDungeonEventsRoutes } from './routes/dungeon.events.routes';
+import { createDungeonUiRoutes } from './routes/dungeon.ui.routes';
 
 export interface AppDeps {
   paymentConfig: PaymentConfig;
@@ -92,6 +94,8 @@ export async function createApp(deps: AppDeps) {
   }));
   app.route('/', createHealthRoutes());
   app.route('/', createGameRoutes(dungeonController, deps.paymentConfig, databaseService));
+  app.route('/', createDungeonEventsRoutes());
+  app.route('/', createDungeonUiRoutes(dungeonController));
   app.route('/', createDaydreamsRoutes({ 
     agentService, 
     contextRegistry, 

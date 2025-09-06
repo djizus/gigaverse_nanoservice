@@ -406,7 +406,7 @@ export class DaydreamsAgentService {
     return controller.signal;
   }
 
-  async suggestMove(input: MoveInput, baseSignal?: AbortSignal): Promise<z.infer<typeof MoveDecisionSchema>> {
+  async suggestMove(input: MoveInput, baseSignal?: AbortSignal, opts?: { modelOverride?: string; system?: string }): Promise<z.infer<typeof MoveDecisionSchema>> {
     if (!this.isEnabled || !this.modelProvider) {
       throw new Error('Daydreams agent is not enabled or API key missing');
     }
@@ -415,12 +415,20 @@ export class DaydreamsAgentService {
     const timeout = setTimeout(() => controller.abort(), aiConfig.timeoutMs);
     if (baseSignal) baseSignal.addEventListener('abort', () => controller.abort(), { once: true });
 
+    const modelId = opts?.modelOverride || aiConfig.model;
     try {
+      console.log('[DaydreamsAgentService] suggestMove', {
+        modelId,
+        systemLen: (opts?.system || '').length,
+        contextLen: JSON.stringify(input.context || '').length,
+        stateLen: JSON.stringify(input.state || {}).length,
+        historyLen: (input.roomDecisionHistory || []).length,
+      });
       const { object } = await generateObject({
-        model: this.modelProvider(aiConfig.model),
+        model: this.modelProvider(modelId),
         schema: MoveDecisionSchema,
         mode: 'json',
-        system: [
+        system: opts?.system || [
           'You are a tactical assistant for a turn-based dungeon game.',
           'Decide the best single move right now. Return valid JSON only.',
           'Consider player/enemy HP, shields, move charges, last moves, and the provided context.',
@@ -441,7 +449,7 @@ export class DaydreamsAgentService {
     }
   }
 
-  async suggestLoot(input: LootInput, baseSignal?: AbortSignal): Promise<z.infer<typeof LootDecisionSchema>> {
+  async suggestLoot(input: LootInput, baseSignal?: AbortSignal, opts?: { modelOverride?: string; system?: string }): Promise<z.infer<typeof LootDecisionSchema>> {
     if (!this.isEnabled || !this.modelProvider) {
       throw new Error('Daydreams agent is not enabled or API key missing');
     }
@@ -450,12 +458,20 @@ export class DaydreamsAgentService {
     const timeout = setTimeout(() => controller.abort(), aiConfig.timeoutMs);
     if (baseSignal) baseSignal.addEventListener('abort', () => controller.abort(), { once: true });
 
+    const modelId = opts?.modelOverride || aiConfig.model;
     try {
+      console.log('[DaydreamsAgentService] suggestLoot', {
+        modelId,
+        systemLen: (opts?.system || '').length,
+        contextLen: JSON.stringify(input.context || '').length,
+        optionsLen: (input.options || []).length,
+        historyLen: (input.roomDecisionHistory || []).length,
+      });
       const { object } = await generateObject({
-        model: this.modelProvider(aiConfig.model),
+        model: this.modelProvider(modelId),
         schema: LootDecisionSchema,
         mode: 'json',
-        system: [
+        system: opts?.system || [
           'You are a tactical assistant for a dungeon game.',
           'Select the best single loot option right now. Return valid JSON only.',
           'Consider player HP/shield/moves, loot boon types/rarity, and the provided context.',
@@ -475,5 +491,23 @@ export class DaydreamsAgentService {
     } finally {
       clearTimeout(timeout);
     }
+  }
+
+  // Text-based decision helpers (no JSON mode)
+  async decideText(modelId: string, system: string, prompt: string, signal?: AbortSignal): Promise<string> {
+    if (!this.modelProvider) {
+      const err: any = new Error('Router not initialized');
+      err.statusCode = 402;
+      err.code = 'PaymentRequired';
+      throw err;
+    }
+    const { text } = await generateText({
+      model: this.modelProvider(modelId),
+      system,
+      prompt,
+      temperature: 0.2,
+      signal,
+    });
+    return text;
   }
 }

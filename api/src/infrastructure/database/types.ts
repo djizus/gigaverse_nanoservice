@@ -4,6 +4,7 @@ export interface DungeonRun {
   id: string;
   player_address: string;
   context: string;
+  llm_model: string;
   total_runs: number;
   completed_runs: number;
   dungeon_id: number;
@@ -11,6 +12,8 @@ export interface DungeonRun {
   consumables: any[];
   gear_instance_ids: string[];
   status: 'started' | 'processing' | 'completed' | 'failed';
+  error_message?: string | null;
+  details?: any[];
   created_at: string;
   updated_at: string;
   completed_at: string | null;
@@ -55,7 +58,7 @@ export type EventType =
 export interface RunEvent {
   id: string;
   dungeon_run_id: string;
-  run_log_id: string;
+  run_log_id: string | null;
   event_type: EventType;
   event_data: Record<string, any>;
   message: string;
@@ -66,6 +69,7 @@ export interface RunEvent {
 export interface CreateDungeonRunInput {
   player_address: string;
   context: string;
+  llm_model?: string;
   total_runs: number;
   dungeon_id: number;
   is_juiced?: boolean;
@@ -85,7 +89,7 @@ export interface CreateRunLogInput {
 
 export interface CreateRunEventInput {
   dungeon_run_id: string;
-  run_log_id: string;
+  run_log_id: string | null;
   event_type: EventType;
   event_data?: Record<string, any>;
   message: string;

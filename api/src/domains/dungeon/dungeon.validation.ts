@@ -10,7 +10,8 @@ export const DungeonRequestSchema = z.object({
   isJuiced: z.boolean().optional().default(false),
   consumables: z.array(z.any()).optional().default([]),
   gearInstanceIds: z.array(z.string()).optional().default([]),
-  sessionId: z.string().optional().default("default")
+  sessionId: z.string().optional().default("default"),
+  llmModel: z.string().optional()
 });
 
 export const DungeonRunOutputSchema = z.object({

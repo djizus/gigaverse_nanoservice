@@ -17,6 +17,7 @@ export interface DungeonRequest {
   isJuiced?: boolean; // Whether to use juice for enhanced rewards
   consumables?: any[]; // Consumables to use in the run
   gearInstanceIds?: string[]; // Gear instance IDs to equip
+  llmModel?: string; // Optional LLM model override for this run
 }
 
 // Legacy types removed - now using real-time database approach with DungeonRunResponse

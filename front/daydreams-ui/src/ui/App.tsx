@@ -31,6 +31,16 @@ export function App() {
     'chutes/deepseek-v3.1',
   ];
   const fallbackContexts = ['gigaverse', 'chat'];
+  // Dungeon form state & live events
+  const [dgPlayer, setDgPlayer] = useState('');
+  const [dgToken, setDgToken] = useState('');
+  const [dgDungeonId, setDgDungeonId] = useState(1);
+  const [dgRuns, setDgRuns] = useState(1);
+  const [dgJuiced, setDgJuiced] = useState(false);
+  const [dgContext, setDgContext] = useState('Be aggressive in combat, prioritize attack upgrades when looting');
+  const [dgModel, setDgModel] = useState(knownModels[0]);
+  const [liveEvents, setLiveEvents] = useState<Record<string, any[]>>({});
+  const [liveRuns, setLiveRuns] = useState<string[]>([]);
 
   // Load contexts and agents on boot
   useEffect(() => {
@@ -87,6 +97,26 @@ export function App() {
       }
     })();
   }, [selectedSession?.id]);
+
+  // Subscribe to global dungeon events SSE
+  useEffect(() => {
+    let cancelled = false;
+    try {
+      const es = new EventSource(`${getBaseUrl()}/dungeon/events`);
+      es.onmessage = (e) => {
+        try {
+          const evt = JSON.parse(e.data);
+          if (!evt?.runId) return;
+          setLiveEvents(prev => ({ ...prev, [evt.runId]: [...(prev[evt.runId] || []), evt] }));
+          setLiveRuns(prev => (prev.includes(evt.runId) ? prev : [evt.runId, ...prev]));
+        } catch {}
+      };
+      es.onerror = () => { /* auto-reconnect by browser */ };
+      return () => { cancelled = true; es.close(); };
+    } catch {
+      // ignore
+    }
+  }, []);
 
   async function handleCreateAgent(form: FormData) {
     try {
@@ -307,6 +337,69 @@ export function App() {
 
           <div style={{ fontWeight: 600, marginBottom: 8 }}>Agents</div>
           {AgentList}
+
+          <div style={{ fontWeight: 600, margin: '16px 0 8px' }}>Start Dungeon Run</div>
+          <div className="card" style={{ marginBottom: 12 }}>
+            <div style={{ marginBottom: 8 }}>
+              <label>Player Address</label>
+              <input value={dgPlayer} onChange={(e) => setDgPlayer(e.target.value)} placeholder="0x..." />
+            </div>
+            <div style={{ marginBottom: 8 }}>
+              <label>Gigaverse Token</label>
+              <textarea style={{ minHeight: 80 }} value={dgToken} onChange={(e) => setDgToken(e.target.value)} placeholder="JWT token" />
+            </div>
+            <div className="row" style={{ marginBottom: 8 }}>
+              <div>
+                <label>Dungeon</label>
+                <select value={dgDungeonId} onChange={(e) => setDgDungeonId(parseInt(e.target.value))}>
+                  {[1,2,3,4,5].map(id => <option key={id} value={id}>{id}</option>)}
+                </select>
+              </div>
+              <div>
+                <label>Runs</label>
+                <input type="number" min={1} max={100} value={dgRuns} onChange={(e) => setDgRuns(parseInt(e.target.value || '1'))} />
+              </div>
+            </div>
+            <div className="row" style={{ marginBottom: 8 }}>
+              <div>
+                <label>Model</label>
+                <select value={dgModel} onChange={(e) => setDgModel(e.target.value)}>
+                  {knownModels.map(m => <option key={m} value={m}>{m}</option>)}
+                </select>
+              </div>
+              <div style={{ alignItems: 'center', display: 'flex' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <input type="checkbox" checked={dgJuiced} onChange={(e) => setDgJuiced(e.target.checked)} />
+                  Juiced
+                </label>
+              </div>
+            </div>
+            <div style={{ marginBottom: 8 }}>
+              <label>Context</label>
+              <textarea style={{ minHeight: 100 }} value={dgContext} onChange={(e) => setDgContext(e.target.value)} />
+            </div>
+            <div className="row">
+              <button className="btn btn-primary" onClick={async () => {
+                try {
+                  setLoading(true);
+                  setError(null);
+                  if (!dgPlayer || !dgToken) throw new Error('Player address and token are required');
+                  const res = await Api.startDungeon({
+                    context: dgContext,
+                    playerAddress: dgPlayer,
+                    gigaverseToken: dgToken,
+                    totalRuns: dgRuns,
+                    dungeonId: dgDungeonId,
+                    isJuiced: dgJuiced,
+                    llmModel: dgModel,
+                  });
+                  setLiveRuns(prev => (prev.includes(res.runId) ? prev : [res.runId, ...prev]));
+                } catch (e: any) {
+                  setError(e.message);
+                } finally { setLoading(false); }
+              }}>Start</button>
+            </div>
+          </div>
         </div>
         <div className="content">
           {!selectedAgent && <div className="card">Select an agent or create a new one.</div>}
@@ -329,6 +422,24 @@ export function App() {
               <MessageInput onSend={handleSendMessage} disabled={!selectedAgent} streaming={streaming} onToggleStreaming={setStreaming} />
             </div>
           )}
+
+          <div className="card" style={{ marginTop: 12 }}>
+            <div style={{ fontWeight: 600, marginBottom: 8 }}>Live Runs</div>
+            {liveRuns.length === 0 && <div style={{ color: '#666' }}>No runs yet.</div>}
+            {liveRuns.map(rid => (
+              <div key={rid} style={{ marginBottom: 10 }}>
+                <div style={{ fontWeight: 600 }}>{rid}</div>
+                <div className="messages" style={{ maxHeight: 220 }}>
+                  {(liveEvents[rid] || []).slice(-50).map((e, i) => (
+                    <div key={i} className={`msg assistant`}>
+                      <div className="meta">{e.type} · {new Date(e.timestamp || Date.now()).toLocaleTimeString()}</div>
+                      <div className="bubble"><code style={{ whiteSpace: 'pre-wrap' }}>{JSON.stringify(e)}</code></div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
     </div>

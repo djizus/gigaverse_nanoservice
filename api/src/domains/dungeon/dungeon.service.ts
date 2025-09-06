@@ -61,6 +61,8 @@ export class DungeonService {
       const dungeonRunInput: CreateDungeonRunInput = {
         player_address: request.playerAddress,
         context: request.context,
+        llm_model: request.llmModel || undefined,
+        meta: { source: 'api', version: 'v1' },
         total_runs: request.totalRuns,
         dungeon_id: request.dungeonId,
         is_juiced: request.isJuiced || false,
@@ -171,7 +173,8 @@ export class DungeonService {
             playerAddress,
             isJuiced,
             consumables,
-            gearInstanceIds
+            gearInstanceIds,
+            llmModel: request.llmModel
           }
         );
         
@@ -235,9 +238,10 @@ export class DungeonService {
       isJuiced: boolean;
       consumables: any[];
       gearInstanceIds: string[];
+      llmModel?: string;
     }
   ): Promise<boolean> {
-    const { runNumber, dungeonId, playerAddress, isJuiced, consumables, gearInstanceIds } = params;
+    const { runNumber, dungeonId, playerAddress, isJuiced, consumables, gearInstanceIds, llmModel } = params;
     
     let roomsCleared = 0;
     let battlesWon = 0;
@@ -283,13 +287,23 @@ export class DungeonService {
         }
         
         if (dungeonState.lootPhase && dungeonState.lootOptions.length > 0) {
+          const { sanitizeStateForLLM } = await import('../gigaverse/gigaverse.prompts');
+          const statePreview = sanitizeStateForLLM({
+            currentDungeon: dungeonState.currentDungeon,
+            currentRoom: dungeonState.currentRoom,
+            currentEnemy: dungeonState.currentEnemy,
+            lootPhase: dungeonState.lootPhase,
+            lastBattleResult: dungeonState.lastBattleResult,
+            player: dungeonState.player,
+            enemy: dungeonState.enemy,
+          });
           // Loot phase - use heuristics for best loot option
           await this.databaseService.logEvent(
             dungeonRunId,
             runLog.id,
             'loot_phase',
             `Loot phase: ${dungeonState.lootOptions.length} options available`,
-            { lootOptions: dungeonState.lootOptions }
+            { lootOptions: dungeonState.lootOptions, state: statePreview }
           );
           
           // Agent-only decision for loot
@@ -309,24 +323,41 @@ export class DungeonService {
 
           let lootChoice: any;
           try {
-            const lootDecision = await this.agent.suggestLoot({
-              context,
-              options: dungeonState.lootOptions,
+            const { buildLootSystem, buildStrategyContext, sanitizeLootOptionsForLLM, sanitizeStateForLLM } = await import('../gigaverse/gigaverse.prompts');
+            const system = buildLootSystem();
+            const strategy = buildStrategyContext(context);
+            const compactState = sanitizeStateForLLM({
+              currentDungeon: dungeonState.currentDungeon,
+              currentRoom: dungeonState.currentRoom,
+              currentEnemy: dungeonState.currentEnemy,
+              lootPhase: dungeonState.lootPhase,
+              lastBattleResult: dungeonState.lastBattleResult,
               player: dungeonState.player,
-              roomDecisionHistory,
+              enemy: dungeonState.enemy,
             });
-
+            const optionsSafe = sanitizeLootOptionsForLLM(dungeonState.lootOptions);
+            const compositeLoot = [
+              'Context:', strategy,
+              'State:', JSON.stringify(compactState),
+              'LootOptions:', JSON.stringify(optionsSafe),
+              'RoomDecisionHistory:', JSON.stringify(roomDecisionHistory || []),
+              (await import('../gigaverse/gigaverse.prompts')).buildLootInstruction(),
+            ].join('\n');
+            const modelIdLoot = llmModel || (await import('../../infrastructure/config/ai.config')).aiConfig.model;
+            const textLoot = await this.agent.decideText(modelIdLoot, system, compositeLoot);
+            const parsedLoot = (await import('../gigaverse/gigaverse.prompts')).parseLootFromText(textLoot || '');
             await this.databaseService.logEvent(
               dungeonRunId,
               runLog.id,
               'agent_decision_loot',
-              `Agent loot decision: ${lootDecision.loot}`,
-              { reason: lootDecision.reason }
+              `Agent loot decision: ${parsedLoot.loot || 'invalid'}`,
+              { reason: parsedLoot.reason, raw: (textLoot || '').slice(0, 300) }
             );
 
-            lootChoice = lootDecision.loot;
+            if (!parsedLoot.loot) throw new Error('Failed to parse loot from agent response');
+            lootChoice = parsedLoot.loot;
             lootChoices.push(lootChoice);
-            roomDecisionHistory.push({ kind: 'loot', choice: lootChoice, reason: lootDecision.reason });
+            roomDecisionHistory.push({ kind: 'loot', choice: lootChoice, reason: parsedLoot.reason || '' });
           } catch (err) {
             const message = `Agent loot decision failed: ${formatErrorMessage(err)}`;
             await this.databaseService.logEvent(
@@ -334,7 +365,7 @@ export class DungeonService {
               runLog.id,
               'agent_error',
               message,
-              { phase: 'loot', error: formatErrorMessage(err) }
+              { phase: 'loot', error: formatErrorMessage(err), model: llmModel || 'default', room: dungeonState.currentRoom }
             );
             await this.databaseService.updateRunLog(runLog.id, { status: 'error', error_message: message });
             await this.databaseService.failDungeonRun(dungeonRunId, message);
@@ -374,6 +405,16 @@ export class DungeonService {
 
         } else {
           // Combat phase - use heuristics for next move
+          const { sanitizeStateForLLM } = await import('../gigaverse/gigaverse.prompts');
+          const statePreview = sanitizeStateForLLM({
+            currentDungeon: dungeonState.currentDungeon,
+            currentRoom: dungeonState.currentRoom,
+            currentEnemy: dungeonState.currentEnemy,
+            lootPhase: dungeonState.lootPhase,
+            lastBattleResult: dungeonState.lastBattleResult,
+            player: dungeonState.player,
+            enemy: dungeonState.enemy,
+          });
           await this.databaseService.logEvent(
             dungeonRunId,
             runLog.id,
@@ -383,7 +424,8 @@ export class DungeonService {
               room: dungeonState.currentRoom, 
               enemy: dungeonState.currentEnemy,
               playerHP: dungeonState.player.health.current,
-              enemyHP: dungeonState.enemy.health.current
+              enemyHP: dungeonState.enemy.health.current,
+              state: statePreview
             }
           );
           
@@ -404,28 +446,39 @@ export class DungeonService {
 
           let move: any;
           try {
-            const moveDecision = await this.agent.suggestMove({
-              context,
-              state: {
-                currentRoom: dungeonState.currentRoom,
-                player: dungeonState.player,
-                enemy: dungeonState.enemy,
-                lastBattleResult: dungeonState.lastBattleResult,
-              },
-              roomDecisionHistory,
+            const { buildMoveSystem, buildStrategyContext, sanitizeStateForLLM, buildMoveInstruction, parseMoveFromText } = await import('../gigaverse/gigaverse.prompts');
+            const system = buildMoveSystem();
+            const strategy = buildStrategyContext(context);
+            const compactState = sanitizeStateForLLM({
+              currentDungeon: dungeonState.currentDungeon,
+              currentRoom: dungeonState.currentRoom,
+              currentEnemy: dungeonState.currentEnemy,
+              lootPhase: dungeonState.lootPhase,
+              lastBattleResult: dungeonState.lastBattleResult,
+              player: dungeonState.player,
+              enemy: dungeonState.enemy,
             });
-
+            const compositeMove = [
+              'Context:', strategy,
+              'State:', JSON.stringify(compactState),
+              'RoomDecisionHistory:', JSON.stringify(roomDecisionHistory || []),
+              buildMoveInstruction(),
+            ].join('\n');
+            const modelIdMove = llmModel || (await import('../../infrastructure/config/ai.config')).aiConfig.model;
+            const textMove = await this.agent.decideText(modelIdMove, system, compositeMove);
+            const parsedMove = parseMoveFromText(textMove || '');
             await this.databaseService.logEvent(
               dungeonRunId,
               runLog.id,
               'agent_decision_move',
-              `Agent move decision: ${moveDecision.move}`,
-              { reason: moveDecision.reason }
+              `Agent move decision: ${parsedMove.move || 'invalid'}`,
+              { reason: parsedMove.reason, raw: (textMove || '').slice(0, 300) }
             );
 
-            move = moveDecision.move;
+            if (!parsedMove.move) throw new Error('Failed to parse move from agent response');
+            move = parsedMove.move;
             moves.push(move);
-            roomDecisionHistory.push({ kind: 'move', choice: move, reason: moveDecision.reason });
+            roomDecisionHistory.push({ kind: 'move', choice: move, reason: parsedMove.reason || '' });
           } catch (err) {
             const message = `Agent move decision failed: ${formatErrorMessage(err)}`;
             await this.databaseService.logEvent(
@@ -433,7 +486,7 @@ export class DungeonService {
               runLog.id,
               'agent_error',
               message,
-              { phase: 'combat', error: formatErrorMessage(err) }
+              { phase: 'combat', error: formatErrorMessage(err), model: llmModel || 'default', room: dungeonState.currentRoom }
             );
             await this.databaseService.updateRunLog(runLog.id, { status: 'error', error_message: message });
             await this.databaseService.failDungeonRun(dungeonRunId, message);

@@ -1,0 +1,191 @@
+{
+  "$id": "https://daydreams.systems/schemas/dungeon-events.v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "DungeonEventsV1",
+  "type": "object",
+  "oneOf": [
+    { "$ref": "#/$defs/Start" },
+    { "$ref": "#/$defs/RoomEntered" },
+    { "$ref": "#/$defs/CombatMove" },
+    { "$ref": "#/$defs/BattleResult" },
+    { "$ref": "#/$defs/LootPhase" },
+    { "$ref": "#/$defs/LootSelected" },
+    { "$ref": "#/$defs/AgentDecisionMove" },
+    { "$ref": "#/$defs/AgentDecisionLoot" },
+    { "$ref": "#/$defs/RunCompleted" },
+    { "$ref": "#/$defs/AllRunsCompleted" },
+    { "$ref": "#/$defs/Error" },
+    { "$ref": "#/$defs/Done" }
+  ],
+  "$defs": {
+    "Base": {
+      "type": "object",
+      "properties": {
+        "version": { "const": "v1" },
+        "type": { "type": "string" },
+        "runId": { "type": "string", "format": "uuid" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "playerAddress": { "type": "string" },
+        "dungeonId": { "type": "integer" },
+        "runNumber": { "type": "integer" },
+        "totalRuns": { "type": "integer" }
+      },
+      "required": ["version", "type", "runId", "timestamp"]
+    },
+    "Start": {
+      "allOf": [
+        { "$ref": "#/$defs/Base" },
+        {
+          "properties": {
+            "type": { "const": "run_started" },
+            "llmModel": { "type": "string" },
+            "context": { "type": "string" }
+          },
+          "required": ["llmModel", "context"]
+        }
+      ]
+    },
+    "RoomEntered": {
+      "allOf": [
+        { "$ref": "#/$defs/Base" },
+        {
+          "properties": {
+            "type": { "const": "room_entered" },
+            "room": { "type": "integer" },
+            "enemy": { "type": "integer" },
+            "playerHP": { "type": "integer" },
+            "enemyHP": { "type": "integer" }
+          },
+          "required": ["room", "enemy"]
+        }
+      ]
+    },
+    "CombatMove": {
+      "allOf": [
+        { "$ref": "#/$defs/Base" },
+        {
+          "properties": {
+            "type": { "const": "combat_move" },
+            "move": { "enum": ["rock", "paper", "scissor"] }
+          },
+          "required": ["move"]
+        }
+      ]
+    },
+    "BattleResult": {
+      "allOf": [
+        { "$ref": "#/$defs/Base" },
+        {
+          "properties": {
+            "type": { "const": "battle_result" },
+            "result": { "enum": ["win", "lose", "draw", "ongoing"] },
+            "playerHP": { "type": "integer" },
+            "enemyHP": { "type": "integer" }
+          },
+          "required": ["result"]
+        }
+      ]
+    },
+    "LootPhase": {
+      "allOf": [
+        { "$ref": "#/$defs/Base" },
+        {
+          "properties": {
+            "type": { "const": "loot_phase" },
+            "options": { "type": "array" }
+          },
+          "required": ["options"]
+        }
+      ]
+    },
+    "LootSelected": {
+      "allOf": [
+        { "$ref": "#/$defs/Base" },
+        {
+          "properties": {
+            "type": { "const": "loot_selected" },
+            "loot": { "enum": ["loot_one", "loot_two", "loot_three", "loot_four"] },
+            "itemsGained": { "type": "integer" }
+          },
+          "required": ["loot"]
+        }
+      ]
+    },
+    "AgentDecisionMove": {
+      "allOf": [
+        { "$ref": "#/$defs/Base" },
+        {
+          "properties": {
+            "type": { "const": "agent_decision_move" },
+            "move": { "enum": ["rock", "paper", "scissor"] },
+            "reason": { "type": "string" }
+          },
+          "required": ["move", "reason"]
+        }
+      ]
+    },
+    "AgentDecisionLoot": {
+      "allOf": [
+        { "$ref": "#/$defs/Base" },
+        {
+          "properties": {
+            "type": { "const": "agent_decision_loot" },
+            "loot": { "enum": ["loot_one", "loot_two", "loot_three", "loot_four"] },
+            "reason": { "type": "string" }
+          },
+          "required": ["loot", "reason"]
+        }
+      ]
+    },
+    "RunCompleted": {
+      "allOf": [
+        { "$ref": "#/$defs/Base" },
+        {
+          "properties": {
+            "type": { "const": "run_completed" },
+            "status": { "enum": ["completed", "died"] },
+            "roomsCleared": { "type": "integer" },
+            "battlesWon": { "type": "integer" },
+            "battlesLost": { "type": "integer" },
+            "itemsGained": { "type": "integer" }
+          },
+          "required": ["status"]
+        }
+      ]
+    },
+    "AllRunsCompleted": {
+      "allOf": [
+        { "$ref": "#/$defs/Base" },
+        {
+          "properties": {
+            "type": { "const": "all_runs_completed" },
+            "completedRuns": { "type": "integer" },
+            "totalRuns": { "type": "integer" },
+            "successRate": { "type": "number" }
+          },
+          "required": ["completedRuns", "totalRuns"]
+        }
+      ]
+    },
+    "Error": {
+      "allOf": [
+        { "$ref": "#/$defs/Base" },
+        {
+          "properties": {
+            "type": { "const": "error" },
+            "code": { "type": "string" },
+            "message": { "type": "string" }
+          },
+          "required": ["message"]
+        }
+      ]
+    },
+    "Done": {
+      "allOf": [
+        { "$ref": "#/$defs/Base" },
+        { "properties": { "type": { "const": "done" } } }
+      ]
+    }
+  }
+}
+
