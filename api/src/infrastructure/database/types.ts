@@ -11,6 +11,9 @@ export interface SummaryRun {
   is_juiced: boolean;
   consumables: any[];
   gear_instance_ids: any[];
+  service_id?: string;
+  developer?: string;
+  meta?: Record<string, any> | null;
   status: 'started' | 'processing' | 'completed' | 'failed' | 'aborted';
   error_message?: string | null;
   details?: SummaryDetail[];

@@ -3,6 +3,7 @@ import { Api, getBaseUrl, setBaseUrl } from '../api';
 import type { AgentConfig, Message, Session } from '../types';
 
 export function App() {
+  type Page = 'dashboard' | 'services' | 'runs' | 'agents' | 'settings';
   const [theme, setTheme] = useState<'light'|'dark'>(() => {
     const saved = localStorage.getItem('theme');
     if (saved === 'light' || saved === 'dark') return saved;
@@ -17,6 +18,8 @@ export function App() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
+  const [page, setPage] = useState<Page>('dashboard');
   const [streaming, setStreaming] = useState(true);
   const knownModels = [
     // Default first
@@ -43,6 +46,21 @@ export function App() {
   const [liveRuns, setLiveRuns] = useState<string[]>([]);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const detailRef = React.useRef<HTMLDivElement | null>(null);
+  // Run -> service mapping for badges
+  const [runServices, setRunServices] = useState<Record<string, string>>({});
+  // Run metadata (status, created_at)
+  const [runsMeta, setRunsMeta] = useState<Record<string, { status?: string; created_at?: string; service_id?: string }>>({});
+  // Runs filters (Runs page)
+  const [runsFilterService, setRunsFilterService] = useState<string>('');
+  const [runsFilterStatus, setRunsFilterStatus] = useState<string>('');
+  const [runsSearch, setRunsSearch] = useState<string>('');
+  // Namespaced services state
+  const [services, setServices] = useState<any[]>([]);
+  const [selectedService, setSelectedService] = useState<string>('gigaverse');
+  const [nsForm, setNsForm] = useState<Record<string, any>>({});
+  const [svcModalOpen, setSvcModalOpen] = useState(false);
+  const [svcModalFor, setSvcModalFor] = useState<any | null>(null);
+  const [profileName, setProfileName] = useState('');
 
   // Load contexts and agents on boot
   useEffect(() => {
@@ -50,24 +68,31 @@ export function App() {
     localStorage.setItem('theme', theme);
   }, [theme]);
 
-  // Load contexts and agents on boot
+  // Load contexts, agents, and services on boot
   useEffect(() => {
     (async () => {
       try {
-        const [ctx, ags] = await Promise.all([Api.listContexts(), Api.listAgents()]);
+        const [ctx, ags, svcs] = await Promise.all([Api.listContexts(), Api.listAgents(), Api.listServices()]);
         setContexts(ctx && ctx.length ? ctx : fallbackContexts);
         setAgents(ags);
+        setServices(Array.isArray(svcs) ? svcs : []);
         // Load existing runs (started/processing)
         try {
           const runs = await Api.listRuns(['started','processing']);
           const ids = runs.map((r: any) => r.id).filter(Boolean);
           if (ids.length) setLiveRuns(prev => Array.from(new Set([...ids, ...prev])));
           const map: Record<string, any[]> = {};
+          const svcMap: Record<string, string> = {};
+          const metaMap: Record<string, { status?: string; created_at?: string; service_id?: string }> = {};
           for (const r of runs) {
             const details = Array.isArray(r.details) ? r.details : [];
             map[r.id] = details.map((d: any) => ({ type: d.event_type || d.type, timestamp: d.timestamp, ...d }));
+            if (r.service_id) svcMap[r.id] = r.service_id;
+            metaMap[r.id] = { status: r.status, created_at: r.created_at, service_id: r.service_id };
           }
           setLiveEvents(prev => ({ ...map, ...prev }));
+          if (Object.keys(svcMap).length) setRunServices(prev => ({ ...svcMap, ...prev }));
+          if (Object.keys(metaMap).length) setRunsMeta(prev => ({ ...metaMap, ...prev }));
         } catch (e: any) {
           setError(`Runs load failed: ${e.message || e}`);
         }
@@ -133,6 +158,13 @@ export function App() {
       // ignore
     }
   }, [apiUrl]);
+
+  // Toast auto-hide
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(null), 2500);
+    return () => clearTimeout(t);
+  }, [toast]);
 
   // Autoscroll to latest event when selected run updates
   useEffect(() => {
@@ -313,148 +345,249 @@ export function App() {
     </div>
   );
 
+  // Modal component
+  function ServiceModal() {
+    if (!svcModalOpen || !svcModalFor) return null;
+    const svc = svcModalFor;
+    const fields = (svc.uiSchema?.fields || []) as any[];
+    const dev = svc.developer || 'daydreams';
+    const storeKey = `svc_profiles:${svc.serviceId}`;
+    const profiles: Record<string, any> = (() => { try { return JSON.parse(localStorage.getItem(storeKey) || '{}'); } catch { return {}; } })();
+    return (
+      <div className="modal" style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.45)', display:'flex', alignItems:'center', justifyContent:'center', zIndex: 50 }}>
+        <div className="card" style={{ width: 640, maxHeight: '80vh', overflow: 'auto' }}>
+          <div className="row" style={{ alignItems:'center' }}>
+            <div style={{ fontWeight: 700 }}>{svc.serviceId}</div>
+            <div style={{ color:'#666' }}>{svc.version}</div>
+            <div style={{ marginLeft: 'auto' }} className="toolbar">
+              <button className="btn" onClick={() => setSvcModalOpen(false)}>Close</button>
+            </div>
+          </div>
+          {svc.summary && <div style={{ color:'#666', marginBottom:8 }}>{svc.summary}</div>}
+          <div className="row" style={{ gap: 8, alignItems:'center', marginBottom: 8 }}>
+            <label>Profile</label>
+            <select onChange={(e)=>{ const name = e.target.value; if (!name) return; const data = profiles[name]; if (data) setNsForm(data); }}>
+              <option value="">-- select saved --</option>
+              {Object.keys(profiles).map(k => <option key={k} value={k}>{k}</option>)}
+            </select>
+            <input placeholder="Save as..." value={profileName} onChange={(e)=> setProfileName(e.target.value)} />
+            <button className="btn" onClick={()=>{ if (!profileName.trim()) return; const next = { ...profiles, [profileName.trim()]: nsForm }; localStorage.setItem(storeKey, JSON.stringify(next)); setToast(`Saved profile '${profileName.trim()}'`); }}>Save</button>
+          </div>
+          <div>
+            {fields.map((f:any) => {
+              const val = nsForm[f.id] ?? (f.default ?? (f.type==='checkbox' ? false : ''));
+              if (f.type === 'checkbox') return (
+                <label key={f.id} style={{ display:'flex', alignItems:'center', gap:8 }}>
+                  <input type="checkbox" checked={!!val} onChange={(e)=> setNsForm(prev=>({ ...prev, [f.id]: e.target.checked }))} />
+                  {f.label}
+                </label>
+              );
+              if (f.type === 'textarea') return (
+                <div key={f.id} style={{ marginBottom: 8 }}>
+                  <label>{f.label}</label>
+                  <textarea style={{ minHeight: 100 }} placeholder={f.placeholder || ''} value={val} onChange={(e)=> setNsForm(prev=>({ ...prev, [f.id]: e.target.value }))} />
+                </div>
+              );
+              return (
+                <div key={f.id} style={{ marginBottom: 8 }}>
+                  <label>{f.label}</label>
+                  <input type={f.type==='number' ? 'number' : 'text'} placeholder={f.placeholder || ''} value={val} onChange={(e)=> setNsForm(prev=>({ ...prev, [f.id]: f.type==='number' ? parseInt(e.target.value||'0') : e.target.value }))} />
+                </div>
+              );
+            })}
+          </div>
+          <div className="row" style={{ marginTop: 8 }}>
+            <button className="btn btn-primary" onClick={async ()=>{ try {
+              const fields = (svc.uiSchema?.fields || []) as any[];
+              // Merge defaults with user input
+              const data: Record<string, any> = {};
+              for (const f of fields) {
+                const has = Object.prototype.hasOwnProperty.call(nsForm, f.id);
+                let v = has ? nsForm[f.id] : undefined;
+                if (v === undefined || v === '') v = f.default;
+                if (f.type === 'checkbox') v = !!v;
+                if (f.type === 'number' && typeof v === 'string') v = parseInt(v || '0');
+                data[f.id] = v;
+              }
+              // simple validation
+              for (const f of fields) {
+                const v = data[f.id];
+                if (f.required && (v === undefined || v === null || v === '' || (f.type==='number' && (typeof v !== 'number' || Number.isNaN(v))))) throw new Error(`Missing required field: ${f.label || f.id}`);
+                if (f.type==='number' && typeof v === 'number') {
+                  if (typeof f.min === 'number' && v < f.min) throw new Error(`${f.label||f.id} must be >= ${f.min}`);
+                  if (typeof f.max === 'number' && v > f.max) throw new Error(`${f.label||f.id} must be <= ${f.max}`);
+                }
+              }
+              setLoading(true); setError(null);
+              const res = await Api.callService(svc.serviceId, dev, 'startRun', data);
+              if (res?.runId) { setLiveRuns(prev => prev.includes(res.runId) ? prev : [res.runId, ...prev]); setToast(`Run started: ${res.runId.slice(0,8)}...`); }
+              setSvcModalOpen(false);
+            } catch (e:any) { setError(e.message); } finally { setLoading(false); } }}>Start</button>
+            <button className="btn" onClick={()=> setSvcModalOpen(false)}>Cancel</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div>
       <div className="header">
-        <strong>Daydreams Agents UI</strong>
+        <strong>Daydreams Control</strong>
+        <div className="row" style={{ gap: 8, marginLeft: 12 }}>
+          <button className="btn" onClick={() => setPage('dashboard')}>Dashboard</button>
+          <button className="btn" onClick={() => setPage('services')}>Services</button>
+          <button className="btn" onClick={() => setPage('runs')}>Runs</button>
+          <button className="btn" onClick={() => setPage('agents')}>Agents</button>
+          <button className="btn" onClick={() => setPage('settings')}>Settings</button>
+        </div>
+        <span style={{ marginLeft: 'auto' }} />
         <button className="btn" onClick={() => setTheme(t => t==='dark'?'light':'dark')}>{theme==='dark' ? '☀️ Light' : '🌙 Dark'}</button>
         <span style={{ color: '#666' }}>API:</span>
         <input style={{ width: 320 }} value={apiUrl} onChange={(e) => { setApiUrl(e.target.value); setBaseUrl(e.target.value); }} />
-        <span style={{ color: '#666' }}>Contexts:</span>
-        <span>{contexts.join(', ') || 'loading...'}</span>
         {loading && <span className="badge">loading</span>}
         {error && <span className="badge" style={{ background: '#fee2e2', borderColor: '#fecaca', color:'#991b1b' }}>{error}</span>}
+        {toast && <span className="badge" style={{ background: '#dcfce7', borderColor:'#bbf7d0', color:'#166534' }}>{toast}</span>}
       </div>
       <div className="container">
-        <div className="sidebar">
-          <div className="card" style={{ marginBottom: 12 }}>
-            <form onSubmit={(e) => { e.preventDefault(); handleCreateAgent(new FormData(e.currentTarget)); e.currentTarget.reset(); }}>
-              <div style={{ fontWeight: 600, marginBottom: 8 }}>Create Agent</div>
-              <div style={{ marginBottom: 8 }}>
-                <label htmlFor="name">Name</label>
-                <input id="name" name="name" placeholder="Name" defaultValue="Gigaverse Agent" />
-              </div>
-              <div className="row" style={{ marginBottom: 8 }}>
-                <div>
-                  <label htmlFor="model">Model</label>
-                  <select id="model" name="model" defaultValue={knownModels[0]}>
-                    {knownModels.map(m => <option key={m} value={m}>{m}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label htmlFor="context">Context</label>
-                  <select id="context" name="context" defaultValue={(contexts.find(c => c==='gigaverse') ?? contexts[0] ?? 'gigaverse')}>
-                    {(contexts.length ? contexts : fallbackContexts).map(c => <option key={c} value={c}>{c}</option>)}
-                  </select>
-                </div>
-              </div>
-              <div style={{ marginBottom: 8 }}>
-                <label htmlFor="description">Description</label>
-                <input id="description" name="description" placeholder="Description (optional)" defaultValue="Gigaverse tactical assistant" />
-              </div>
-              <div style={{ marginBottom: 8 }}>
-                <label htmlFor="instructions">Instructions</label>
-                <textarea id="instructions" name="instructions" placeholder="Instructions (optional)" style={{ minHeight: 140 }} defaultValue="You assist with Gigaverse gameplay, dungeon strategies and agent tasks. Be concise, helpful, and contextual."></textarea>
-              </div>
-              <div className="row">
-                <button className="btn btn-primary" type="submit">Create</button>
-                <button className="btn btn-secondary" type="button" onClick={ensureGigaverseAgent}>Quick: Base Gigaverse Agent</button>
-              </div>
-            </form>
-          </div>
-
-          <div style={{ fontWeight: 600, marginBottom: 8 }}>Agents</div>
-          {AgentList}
-
-          <div style={{ fontWeight: 600, margin: '16px 0 8px' }}>Start Dungeon Run</div>
-          <div className="card" style={{ marginBottom: 12 }}>
-            <div style={{ marginBottom: 8 }}>
-              <label>Player Address</label>
-              <input value={dgPlayer} onChange={(e) => setDgPlayer(e.target.value)} placeholder="0x..." />
+        {page === 'services' && (
+          <div className="content">
+            <div className="row" style={{ alignItems:'center', marginBottom: 8 }}>
+              <div style={{ fontWeight: 600 }}>Services</div>
+              <div style={{ color:'#666' }}>{services.length} available</div>
             </div>
-            <div style={{ marginBottom: 8 }}>
-              <label>Gigaverse Token</label>
-              <textarea style={{ minHeight: 80 }} value={dgToken} onChange={(e) => setDgToken(e.target.value)} placeholder="JWT token" />
-            </div>
-            <div className="row" style={{ marginBottom: 8 }}>
-              <div>
-                <label>Dungeon</label>
-                <select value={dgDungeonId} onChange={(e) => setDgDungeonId(parseInt(e.target.value))}>
-                  {[1,2,3,4,5].map(id => <option key={id} value={id}>{id}</option>)}
-                </select>
-              </div>
-              <div>
-                <label>Runs</label>
-                <input type="number" min={1} max={100} value={dgRuns} onChange={(e) => setDgRuns(parseInt(e.target.value || '1'))} />
-              </div>
-            </div>
-            <div className="row" style={{ marginBottom: 8 }}>
-              <div>
-                <label>Model</label>
-                <select value={dgModel} onChange={(e) => setDgModel(e.target.value)}>
-                  {knownModels.map(m => <option key={m} value={m}>{m}</option>)}
-                </select>
-              </div>
-              <div style={{ alignItems: 'center', display: 'flex' }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <input type="checkbox" checked={dgJuiced} onChange={(e) => setDgJuiced(e.target.checked)} />
-                  Juiced
-                </label>
-              </div>
-            </div>
-            <div style={{ marginBottom: 8 }}>
-              <label>Instructions</label>
-              <textarea style={{ minHeight: 100 }} value={dgContext} onChange={(e) => setDgContext(e.target.value)} />
-            </div>
-            <div className="row">
-              <button className="btn btn-primary" onClick={async () => {
-                try {
-                  setLoading(true);
-                  setError(null);
-                  if (!dgPlayer || !dgToken) throw new Error('Player address and token are required');
-                  const res = await Api.startDungeon({
-                    context: dgContext,
-                    playerAddress: dgPlayer,
-                    gigaverseToken: dgToken,
-                    totalRuns: dgRuns,
-                    dungeonId: dgDungeonId,
-                    isJuiced: dgJuiced,
-                    llmModel: dgModel,
-                  });
-                  setLiveRuns(prev => (prev.includes(res.runId) ? prev : [res.runId, ...prev]));
-                } catch (e: any) {
-                  setError(e.message);
-                } finally { setLoading(false); }
-              }}>Start</button>
-            </div>
-          </div>
-        </div>
-        <div className="content">
-          {!selectedAgent && <div className="card">Select an agent or create a new one.</div>}
-          {selectedAgent && (
-            <div className="chat">
-              <div className="row" style={{ alignItems: 'center' }}>
-                <div style={{ fontWeight: 600 }}>{selectedAgent.name}</div>
-                <div style={{ color: '#666' }}>{selectedAgent.model} · {selectedAgent.context}</div>
-                <div style={{ marginLeft: 'auto' }}>{SessionSelector}</div>
-              </div>
-              <div className="messages" id="messages">
-                {messages.map(m => (
-                  <div key={m.id} className={`msg ${m.role}`}>
-                    <div className="meta">{m.role} · {new Date(m.createdAt).toLocaleTimeString()}</div>
-                    <div className="bubble">{m.content}</div>
+            <div className="list">
+              {(services || []).map((s:any) => (
+                <div key={`${s.developer}:${s.serviceId}`} className="card">
+                  <div className="row" style={{ alignItems:'center' }}>
+                    <div style={{ fontWeight: 600 }}>{s.serviceId}</div>
+                    <div style={{ color:'#666' }}>{s.version}</div>
+                    <div style={{ marginLeft: 'auto' }} className="toolbar">
+                      <button className="btn btn-primary" onClick={()=>{ setSelectedService(s.serviceId); setSvcModalFor(s); setNsForm({}); setSvcModalOpen(true); }}>Launch</button>
+                    </div>
                   </div>
-                ))}
-                {messages.length === 0 && <div style={{ color: '#666' }}>No messages yet.</div>}
+                  {s.summary && <div style={{ color:'#666' }}>{s.summary}</div>}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        {page !== 'services' && (
+        <div className="content">
+          {page === 'agents' && (
+            <>
+              <div className="card" style={{ marginBottom: 12 }}>
+                <form onSubmit={(e) => { e.preventDefault(); handleCreateAgent(new FormData(e.currentTarget)); e.currentTarget.reset(); }}>
+                  <div style={{ fontWeight: 600, marginBottom: 8 }}>Create Agent</div>
+                  <div style={{ marginBottom: 8 }}>
+                    <label htmlFor="name">Name</label>
+                    <input id="name" name="name" placeholder="Name" defaultValue="Gigaverse Agent" />
+                  </div>
+                  <div className="row" style={{ marginBottom: 8 }}>
+                    <div>
+                      <label htmlFor="model">Model</label>
+                      <select id="model" name="model" defaultValue={knownModels[0]}>
+                        {knownModels.map(m => <option key={m} value={m}>{m}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label htmlFor="context">Context</label>
+                      <select id="context" name="context" defaultValue={(contexts.find(c => c==='gigaverse') ?? contexts[0] ?? 'gigaverse')}>
+                        {(contexts.length ? contexts : fallbackContexts).map(c => <option key={c} value={c}>{c}</option>)}
+                      </select>
+                    </div>
+                  </div>
+                  <div style={{ marginBottom: 8 }}>
+                    <label htmlFor="description">Description</label>
+                    <input id="description" name="description" placeholder="Description (optional)" defaultValue="Gigaverse tactical assistant" />
+                  </div>
+                  <div style={{ marginBottom: 8 }}>
+                    <label htmlFor="instructions">Instructions</label>
+                    <textarea id="instructions" name="instructions" placeholder="Instructions (optional)" style={{ minHeight: 140 }} defaultValue="You assist with Gigaverse gameplay, dungeon strategies and agent tasks. Be concise, helpful, and contextual."></textarea>
+                  </div>
+                  <div className="row">
+                    <button className="btn btn-primary" type="submit">Create</button>
+                    <button className="btn btn-secondary" type="button" onClick={ensureGigaverseAgent}>Quick: Base Gigaverse Agent</button>
+                  </div>
+                </form>
               </div>
-              <MessageInput onSend={handleSendMessage} disabled={!selectedAgent} streaming={streaming} onToggleStreaming={setStreaming} />
+              <div style={{ fontWeight: 600, marginBottom: 8 }}>Agents</div>
+              {AgentList}
+              {!selectedAgent && <div className="card">Select an agent to open chat.</div>}
+              {selectedAgent && (
+                <div className="chat">
+                  <div className="row" style={{ alignItems: 'center' }}>
+                    <div style={{ fontWeight: 600 }}>{selectedAgent.name}</div>
+                    <div style={{ color: '#666' }}>{selectedAgent.model} · {selectedAgent.context}</div>
+                    <div style={{ marginLeft: 'auto' }}>{SessionSelector}</div>
+                  </div>
+                  <div className="messages" id="messages">
+                    {messages.map(m => (
+                      <div key={m.id} className={`msg ${m.role}`}>
+                        <div className="meta">{m.role} · {new Date(m.createdAt).toLocaleTimeString()}</div>
+                        <div className="bubble">{m.content}</div>
+                      </div>
+                    ))}
+                    {messages.length === 0 && <div style={{ color: '#666' }}>No messages yet.</div>}
+                  </div>
+                  <MessageInput onSend={handleSendMessage} disabled={!selectedAgent} streaming={streaming} onToggleStreaming={setStreaming} />
+                </div>
+              )}
+            </>
+          )}
+
+          {page === 'runs' && (
+            <div className="card" style={{ marginTop: 12 }}>
+              <div className="row" style={{ gap: 8, alignItems:'center' }}>
+                <label>Service</label>
+                <select value={runsFilterService} onChange={(e)=> setRunsFilterService(e.target.value)}>
+                  <option value="">All</option>
+                  {(services||[]).map((s:any)=> <option key={s.serviceId} value={s.serviceId}>{s.serviceId}</option>)}
+                </select>
+                <label>Status</label>
+                <select value={runsFilterStatus} onChange={(e)=> setRunsFilterStatus(e.target.value)}>
+                  <option value="">All</option>
+                  <option value="started">started</option>
+                  <option value="processing">processing</option>
+                  <option value="completed">completed</option>
+                  <option value="failed">failed</option>
+                  <option value="aborted">aborted</option>
+                </select>
+                <input placeholder="Search by ID" value={runsSearch} onChange={(e)=> setRunsSearch(e.target.value)} />
+                <button className="btn" onClick={async ()=>{
+                  try {
+                    setLoading(true);
+                    const runs = await Api.listRuns();
+                    const ids = runs.map((r:any)=>r.id).filter(Boolean);
+                    setLiveRuns(ids);
+                    const meta: Record<string, any> = {}; const svcMap: Record<string, string> = {};
+                    for (const r of runs) { meta[r.id] = { status: r.status, created_at: r.created_at, service_id: r.service_id }; if (r.service_id) svcMap[r.id]=r.service_id; }
+                    setRunsMeta(meta); setRunServices(svcMap);
+                  } finally { setLoading(false); }
+                }}>Refresh</button>
+              </div>
             </div>
           )}
 
+          {(page === 'runs' || page === 'dashboard') && (
           <div className="card" style={{ marginTop: 12 }}>
             <div style={{ fontWeight: 600, marginBottom: 8 }}>Live Runs</div>
-            {liveRuns.length === 0 && <div style={{ color: '#666' }}>No runs yet.</div>}
-            {liveRuns.map(rid => {
+            {liveRuns.filter(rid => {
+              if (page === 'runs') {
+                if (runsFilterService && runServices[rid] !== runsFilterService) return false;
+                if (runsFilterStatus && (runsMeta[rid]?.status !== runsFilterStatus)) return false;
+                if (runsSearch && !rid.includes(runsSearch)) return false;
+              }
+              return true;
+            }).length === 0 && <div style={{ color: '#666' }}>No runs yet.</div>}
+            {liveRuns.filter(rid => {
+              if (page === 'runs') {
+                if (runsFilterService && runServices[rid] !== runsFilterService) return false;
+                if (runsFilterStatus && (runsMeta[rid]?.status !== runsFilterStatus)) return false;
+                if (runsSearch && !rid.includes(runsSearch)) return false;
+              }
+              return true;
+            }).map(rid => {
               const events = liveEvents[rid] || [];
               const last = events[events.length - 1];
               // Derive stage-room badge
@@ -467,6 +600,8 @@ export function App() {
                     <div style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis' }}>{rid}</div>
                     <div style={{ fontSize: 12, color: '#666', display: 'flex', gap: 8, alignItems: 'center' }}>
                       <span>{last ? `${last.type} · ${new Date(last.timestamp || Date.now()).toLocaleTimeString()}` : 'waiting...'}</span>
+                      {runServices[rid] && (<span className="badge">{runServices[rid]}</span>)}
+                      {runsMeta[rid]?.status && (<span className="badge">{runsMeta[rid]?.status}</span>)}
                       {stage && roomInStage && (
                         <span className="badge">Stage {stage}-{roomInStage}{absRoom ? ` (abs ${absRoom})` : ''}</span>
                       )}
@@ -479,12 +614,15 @@ export function App() {
               );
             })}
           </div>
+          )}
 
           {selectedRunId && (
             <div className="card" style={{ marginTop: 12 }}>
               <div className="row" style={{ alignItems: 'center' }}>
                 <div style={{ fontWeight: 600 }}>Run Detail</div>
                 <div style={{ color: '#666' }}>{selectedRunId}</div>
+                {runServices[selectedRunId] && (<span className="badge">{runServices[selectedRunId]}</span>)}
+                {runsMeta[selectedRunId]?.status && (<span className="badge">{runsMeta[selectedRunId]?.status}</span>)}
                 <div style={{ marginLeft: 'auto' }} className="toolbar">
                   <button className="btn" onClick={() => { navigator.clipboard?.writeText(selectedRunId || ''); }}>Copy ID</button>
                   <button className="btn btn-danger" onClick={() => {
@@ -530,15 +668,24 @@ export function App() {
                   } else if (e.type === 'error' || e.type === 'agent_error') {
                     summary = e.message || 'Error';
                   }
-                  return (
-                    <div key={i} className={`msg assistant`}>
-                      <div className="meta">{e.type} · {ts}</div>
-                      <div className="bubble">
-                        {summary ? <div style={{ marginBottom: 6 }}>{summary}</div> : null}
-                        <code style={{ whiteSpace: 'pre-wrap' }}>{JSON.stringify(e)}</code>
+                    return (
+                      <div key={i} className={`msg assistant`}>
+                        <div className="meta">{e.type} · {ts}</div>
+                        <div className="bubble">
+                          {summary ? <div style={{ marginBottom: 6 }}>{summary}</div> : null}
+                          {e.xml ? (
+                            <details>
+                              <summary>Context (XML)</summary>
+                              <pre style={{ whiteSpace: 'pre-wrap' }}>{e.xml}</pre>
+                            </details>
+                          ) : null}
+                          <details>
+                            <summary>Raw</summary>
+                            <code style={{ whiteSpace: 'pre-wrap' }}>{JSON.stringify(e, null, 2)}</code>
+                          </details>
+                        </div>
                       </div>
-                    </div>
-                  );
+                    );
                 })}
                 {(liveEvents[selectedRunId] || []).length === 0 && (
                   <div style={{ color: '#666' }}>No events yet for this run.</div>
@@ -546,8 +693,10 @@ export function App() {
               </div>
             </div>
           )}
-        </div>
+          </div>
+        )}
       </div>
+      <ServiceModal />
     </div>
   );
 }

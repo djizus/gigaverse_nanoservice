@@ -17,6 +17,10 @@ import { aiConfig } from '../infrastructure/config/ai.config';
 import { AgentRegistry } from '../infrastructure/agents/agent-registry';
 import { createDungeonEventsRoutes } from './routes/dungeon.events.routes';
 import { createDungeonUiRoutes } from './routes/dungeon.ui.routes';
+import { ServiceRegistry, createServicesRoutes } from '../infrastructure/services/service-registry';
+import { createNamespacedServiceRoutes } from './routes/ns.routes';
+import { GigaverseServicePlugin } from '../services/gigaverse/gigaverse.plugin';
+import { LootSurvivorServicePlugin } from '../services/loot-survivor/loot-survivor.plugin';
 
 export interface AppDeps {
   paymentConfig: PaymentConfig;
@@ -105,6 +109,20 @@ export async function createApp(deps: AppDeps) {
   
   // Nano services using existing daydreams routes
   console.log(`🔗 Nano services available via /daydreams/* endpoints`);
+
+  // Service Registry (namespaced services)
+  const registry = new ServiceRegistry();
+  // Register Gigaverse plugin (developer default daydreams)
+  const gvPlugin = new GigaverseServicePlugin({ developer: 'daydreams', database: databaseService, agent: daydreamsAgent });
+  await gvPlugin.init();
+  registry.register(gvPlugin);
+  // Register Loot Survivor plugin (read-only)
+  const lsPlugin = new LootSurvivorServicePlugin({ developer: 'daydreams', database: databaseService });
+  await lsPlugin.init();
+  registry.register(lsPlugin);
+  app.route('/', createServicesRoutes(registry));
+  app.route('/', createNamespacedServiceRoutes(registry));
+  console.log(`🧩 Namespaced services available via /ns/:developer/:service/* endpoints`);
 
   return app;
 }

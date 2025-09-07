@@ -18,6 +18,13 @@ async function http<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const Api = {
+  async listServices(): Promise<any[]> {
+    return http('/services');
+  },
+  async callService(serviceId: string, developer: string | undefined, op: string, data: any): Promise<any> {
+    const dev = developer || 'daydreams';
+    return http(`/ns/${encodeURIComponent(dev)}/${encodeURIComponent(serviceId)}/call`, { method: 'POST', body: JSON.stringify({ op, data }) });
+  },
   async listContexts(): Promise<string[]> {
     const data = await http<any[]>('/daydreams/contexts');
     // API returns objects: { id, name, description }
@@ -88,6 +95,7 @@ export const Api = {
     }
   }
   ,
+  // Back-compat wrapper: starts Gigaverse run via namespaced /ns call
   startDungeon(payload: {
     context: string;
     playerAddress: string;
@@ -99,7 +107,16 @@ export const Api = {
     gearInstanceIds?: string[];
     llmModel?: string;
   }): Promise<{ runId: string; status: string; message: string; }> {
-    return http('/ui/dungeon/start', { method: 'POST', body: JSON.stringify(payload) });
+    return http(`/ns/daydreams/gigaverse/call`, { method: 'POST', body: JSON.stringify({ op: 'startRun', data: payload }) });
+  }
+  ,
+  // Loot Survivor read-only operations
+  startLSRun(payload: { gameId: number; llmModel?: string; }): Promise<{ runId: string; status: string; message: string; }> {
+    return http(`/ns/daydreams/loot-survivor/call`, { method: 'POST', body: JSON.stringify({ op: 'startRun', data: payload }) });
+  }
+  ,
+  getLSContext(gameId: number): Promise<{ content: string; tokens: number; }> {
+    return http(`/ns/daydreams/loot-survivor/call`, { method: 'POST', body: JSON.stringify({ op: 'context', data: { gameId } }) });
   }
   ,
   listRuns(status?: string[]): Promise<any[]> {
