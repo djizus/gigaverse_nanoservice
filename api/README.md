@@ -1,6 +1,9 @@
-# Gigaverse Dungeon Nanoservice
+# API: Namespaced Nano‑Services (Gigaverse + Loot Survivor)
 
-A real-time dungeon running service for Gigaverse with micropayment integration. This service provides paid dungeon runs with real-time event logging using x402 micropayments on Base Sepolia and Supabase for live database updates.
+The API hosts multiple independent nano‑services behind a single Hono server using a Service Registry and namespaced routes. Built‑in services:
+
+- Gigaverse: real‑time dungeon runner (agent‑driven decisions, Supabase events)
+- Loot Survivor: read‑only Torii context + basic run logger (no on‑chain execution yet)
 
 ## Features
 
@@ -20,11 +23,15 @@ A real-time dungeon running service for Gigaverse with micropayment integration.
 bun install
 ```
 
-2. Set up the database:
+2. Set up the database (Supabase/Postgres):
 
 ```bash
 # Create database tables (Supabase or PostgreSQL)
+# Fresh install
 psql -d your_database -f database/schema.sql
+
+# Upgrading existing DB
+psql -d your_database -f database/migrations/20250907_ns_services.sql
 ```
 
 3. Create a `.env` file with your configuration:
@@ -42,6 +49,10 @@ SUPABASE_KEY=your_supabase_key_here
 
 # Optional
 PORT=4021  # Default service port
+
+# LS Torii (Loot Survivor)
+TORII_URL=https://api.cartridge.gg/x/pg-sepolia/torii
+NAMESPACE=ls_0_0_6
 ```
 
 4. Run the server:
