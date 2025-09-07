@@ -87,9 +87,11 @@ temp/
 **/temp/
 
 # Fun folder (reference project)
+old/*
 fun/
 old/fun/
 old/agent-gmx/
+old/LS-ENGINE
 
 # TypeScript
 *.tsbuildinfo
