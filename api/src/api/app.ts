@@ -21,6 +21,7 @@ import { ServiceRegistry, createServicesRoutes } from '../infrastructure/service
 import { createNamespacedServiceRoutes } from './routes/ns.routes';
 import { GigaverseServicePlugin } from '../services/gigaverse/gigaverse.plugin';
 import { LootSurvivorServicePlugin } from '../services/loot-survivor/loot-survivor.plugin';
+import { createUserAuthMiddleware } from '../shared/middleware/user-auth.middleware';
 
 export interface AppDeps {
   paymentConfig: PaymentConfig;
@@ -76,15 +77,23 @@ export async function createApp(deps: AppDeps) {
   const app = new Hono();
 
   // CORS for browser-based frontends
-  const corsOrigin = process.env.CORS_ORIGIN || '*';
-  console.log(`🌐 CORS origin: ${corsOrigin}`);
+  const corsOriginRaw = process.env.CORS_ORIGIN || '*';
+  const corsAllowed = corsOriginRaw.split(',').map(s => s.trim()).filter(Boolean);
+  console.log(`🌐 CORS origin(s): ${corsAllowed.join(', ') || '*'}`);
   app.use('/*', cors({
-    origin: corsOrigin,
+    origin: (origin) => {
+      if (!origin) return corsAllowed.includes('*') ? '*' : false;
+      if (corsAllowed.includes('*')) return '*';
+      return corsAllowed.includes(origin) ? origin : false;
+    },
     allowMethods: ['GET', 'POST', 'OPTIONS', 'PUT', 'DELETE'],
     allowHeaders: [
       'Content-Type',
       'Authorization',
+      'authorization',
       'X-Requested-With',
+      'x-user-id',
+      'X-User-Id',
       // Helpful for x402 headers if sent by clients
       'x402-price',
       'x402-network',
@@ -96,10 +105,28 @@ export async function createApp(deps: AppDeps) {
     credentials: false,
     maxAge: 600,
   }));
+  // Basic request logger to help diagnose routing/CORS issues
+  app.use('*', async (c, next) => {
+    if (process.env.LOG_LEVEL === 'debug') {
+      try { console.log(`[HTTP] ${c.req.method} ${c.req.path}`); } catch {}
+    }
+    return next();
+  });
   app.route('/', createHealthRoutes());
   app.route('/', createGameRoutes(dungeonController, deps.paymentConfig, databaseService));
   app.route('/', createDungeonEventsRoutes());
   app.route('/', createDungeonUiRoutes(dungeonController, databaseService));
+  // Auth for user-scoped Daydreams routes (keep /daydreams/contexts public)
+  const userAuth = createUserAuthMiddleware({
+    supabaseUrl: deps.supabaseConfig.url,
+    supabaseKey: deps.supabaseConfig.anonKey,
+    allowDevHeader: process.env.DAYDREAMS_USE_MEMORY === 'true',
+  });
+  // Protect both root and nested routes for agents/sessions
+  app.use('/daydreams/agents', userAuth);
+  app.use('/daydreams/agents/*', userAuth);
+  app.use('/daydreams/sessions', userAuth);
+  app.use('/daydreams/sessions/*', userAuth);
   app.route('/', createDaydreamsRoutes({ 
     agentService, 
     contextRegistry, 

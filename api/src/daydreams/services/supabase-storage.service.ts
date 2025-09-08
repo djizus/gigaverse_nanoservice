@@ -16,17 +16,22 @@ export class SupabaseStorage implements DaydreamsStorage {
   }
 
   // Agents
-  async listAgents(): Promise<AgentConfig[]> {
-    const { data, error } = await this.supabase
+  async listAgents(opts?: { userId?: string }): Promise<AgentConfig[]> {
+    let query = this.supabase
       .from('agents')
       .select('*')
       .order('created_at', { ascending: false });
+    if (opts?.userId) {
+      query = query.eq('user_id', opts.userId);
+    }
+    const { data, error } = await query;
     if (error) throw error;
     console.log(`[Daydreams][Storage] listAgents count=${data?.length ?? 0}`);
     return (data || []).map(mapAgentFromRow);
   }
 
-  async createAgent(input: CreateAgentInput): Promise<AgentConfig> {
+  async createAgent(input: CreateAgentInput, opts?: { userId?: string }): Promise<AgentConfig> {
+    if (process.env.LOG_LEVEL === 'debug') console.log('[Daydreams][Storage][Supabase] createAgent userId=', input.userId || opts?.userId);
     const { data, error } = await this.supabase
       .from('agents')
       .insert([{
@@ -40,6 +45,7 @@ export class SupabaseStorage implements DaydreamsStorage {
         mcp_config: input.mcpConfig ?? null,
         instructions: input.instructions ?? null,
         status: input.status ?? 'active',
+        user_id: input.userId || opts?.userId || null,
       }])
       .select('*')
       .single();
@@ -48,19 +54,28 @@ export class SupabaseStorage implements DaydreamsStorage {
     return mapAgentFromRow(data);
   }
 
-  async getAgent(id: string): Promise<AgentConfig | null> {
-    const { data, error } = await this.supabase
+  async getAgent(id: string, opts?: { userId?: string }): Promise<AgentConfig | null> {
+    let query = this.supabase
       .from('agents')
       .select('*')
       .eq('id', id)
       .maybeSingle();
+    if (opts?.userId) {
+      query = this.supabase
+        .from('agents')
+        .select('*')
+        .eq('id', id)
+        .eq('user_id', opts.userId)
+        .maybeSingle();
+    }
+    const { data, error } = await query;
     if (error) throw error;
     console.log(`[Daydreams][Storage] getAgent id=${data?.id ?? null}`);
     return data ? mapAgentFromRow(data) : null;
   }
 
-  async updateAgent(id: string, input: UpdateAgentInput): Promise<AgentConfig | null> {
-    const { data, error } = await this.supabase
+  async updateAgent(id: string, input: UpdateAgentInput, opts?: { userId?: string }): Promise<AgentConfig | null> {
+    let query = this.supabase
       .from('agents')
       .update({
         ...input,
@@ -68,16 +83,34 @@ export class SupabaseStorage implements DaydreamsStorage {
       .eq('id', id)
       .select('*')
       .maybeSingle();
+    if (opts?.userId) {
+      query = this.supabase
+        .from('agents')
+        .update({ ...input })
+        .eq('id', id)
+        .eq('user_id', opts.userId)
+        .select('*')
+        .maybeSingle();
+    }
+    const { data, error } = await query;
     if (error) throw error;
     console.log(`[Daydreams][Storage] updateAgent id=${data?.id ?? null}`);
     return data ? mapAgentFromRow(data) : null;
   }
 
-  async deleteAgent(id: string): Promise<boolean> {
-    const { error } = await this.supabase
+  async deleteAgent(id: string, opts?: { userId?: string }): Promise<boolean> {
+    let query = this.supabase
       .from('agents')
       .delete()
       .eq('id', id);
+    if (opts?.userId) {
+      query = this.supabase
+        .from('agents')
+        .delete()
+        .eq('id', id)
+        .eq('user_id', opts.userId);
+    }
+    const { error } = await query;
     if (error) throw error;
     console.log(`[Daydreams][Storage] deleteAgent id=${id} ok=true`);
     return true;
@@ -185,6 +218,7 @@ function mapAgentFromRow(row: any): AgentConfig {
     stats: row.stats ?? undefined,
     instructions: row.instructions ?? undefined,
     status: row.status,
+    userId: row.user_id ?? undefined,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

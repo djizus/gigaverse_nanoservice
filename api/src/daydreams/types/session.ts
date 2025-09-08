@@ -5,6 +5,8 @@ export interface Session {
   agentId: string;
   title?: string;
   status: 'active' | 'archived';
+  // Optional owner scoping
+  userId?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -17,4 +19,3 @@ export interface Message {
   content: string;
   createdAt: string;
 }
-

@@ -8,11 +8,13 @@ export class MemoryStorage implements DaydreamsStorage {
   private sessions: Session[] = [];
   private messages: Message[] = [];
 
-  async listAgents(): Promise<AgentConfig[]> {
+  async listAgents(opts?: { userId?: string }): Promise<AgentConfig[]> {
+    if (opts?.userId) return this.agents.filter(a => a.userId === opts.userId);
     return [...this.agents];
   }
 
-  async createAgent(input: CreateAgentInput): Promise<AgentConfig> {
+  async createAgent(input: CreateAgentInput, opts?: { userId?: string }): Promise<AgentConfig> {
+    if (process.env.LOG_LEVEL === 'debug') console.log('[Daydreams][Storage][Memory] createAgent userId=', input.userId || opts?.userId);
     const now = new Date().toISOString();
     const agent: AgentConfig = {
       id: randomUUID(),
@@ -22,6 +24,7 @@ export class MemoryStorage implements DaydreamsStorage {
       description: input.description,
       instructions: input.instructions,
       status: input.status ?? 'active',
+      userId: input.userId || opts?.userId,
       createdAt: now,
       updatedAt: now,
     };
@@ -29,13 +32,17 @@ export class MemoryStorage implements DaydreamsStorage {
     return agent;
   }
 
-  async getAgent(id: string): Promise<AgentConfig | null> {
-    return this.agents.find(a => a.id === id) ?? null;
+  async getAgent(id: string, opts?: { userId?: string }): Promise<AgentConfig | null> {
+    const a = this.agents.find(a => a.id === id) ?? null;
+    if (!a) return null;
+    if (opts?.userId && a.userId && a.userId !== opts.userId) return null;
+    return a;
   }
 
-  async updateAgent(id: string, input: UpdateAgentInput): Promise<AgentConfig | null> {
+  async updateAgent(id: string, input: UpdateAgentInput, opts?: { userId?: string }): Promise<AgentConfig | null> {
     const idx = this.agents.findIndex(a => a.id === id);
     if (idx === -1) return null;
+    if (opts?.userId && this.agents[idx].userId && this.agents[idx].userId !== opts.userId) return null;
     const updated: AgentConfig = {
       ...this.agents[idx],
       ...input,
@@ -45,8 +52,11 @@ export class MemoryStorage implements DaydreamsStorage {
     return updated;
   }
 
-  async deleteAgent(id: string): Promise<boolean> {
+  async deleteAgent(id: string, opts?: { userId?: string }): Promise<boolean> {
     const before = this.agents.length;
+    const agent = this.agents.find(a => a.id === id);
+    if (!agent) return false;
+    if (opts?.userId && agent.userId && agent.userId !== opts.userId) return false;
     this.agents = this.agents.filter(a => a.id !== id);
     // Also cascade-delete sessions/messages in memory for cleanliness
     const sessionsToDelete = this.sessions.filter(s => s.agentId === id).map(s => s.id);
@@ -70,7 +80,8 @@ export class MemoryStorage implements DaydreamsStorage {
   }
 
   async getSession(id: string): Promise<Session | null> {
-    return this.sessions.find(s => s.id === id) ?? null;
+    const s = this.sessions.find(s => s.id === id) ?? null;
+    return s;
   }
 
   async listAgentSessions(agentId: string): Promise<Session[]> {

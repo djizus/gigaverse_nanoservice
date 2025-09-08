@@ -3,11 +3,11 @@ import { Message, Session } from "../types/session";
 
 export interface DaydreamsStorage {
   // Agents
-  listAgents(): Promise<AgentConfig[]>;
-  createAgent(input: CreateAgentInput): Promise<AgentConfig>;
-  getAgent(id: string): Promise<AgentConfig | null>;
-  updateAgent(id: string, input: UpdateAgentInput): Promise<AgentConfig | null>;
-  deleteAgent(id: string): Promise<boolean>;
+  listAgents(opts?: { userId?: string }): Promise<AgentConfig[]>;
+  createAgent(input: CreateAgentInput, opts?: { userId?: string }): Promise<AgentConfig>;
+  getAgent(id: string, opts?: { userId?: string }): Promise<AgentConfig | null>;
+  updateAgent(id: string, input: UpdateAgentInput, opts?: { userId?: string }): Promise<AgentConfig | null>;
+  deleteAgent(id: string, opts?: { userId?: string }): Promise<boolean>;
   // Templates (optional; SupabaseStorage implements)
   getTemplateById?(id: string): Promise<{
     id: string;

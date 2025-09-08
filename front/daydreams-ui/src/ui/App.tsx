@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Api, getBaseUrl, setBaseUrl } from '../api';
 import type { AgentConfig, Message, Session } from '../types';
+import { AuthPanel } from './AuthPanel';
 
 export function App() {
   type Page = 'dashboard' | 'services' | 'runs' | 'agents' | 'settings';
@@ -71,35 +72,49 @@ export function App() {
   // Load contexts, agents, and services on boot
   useEffect(() => {
     (async () => {
+      // Contexts are public; agents may 401 when not authenticated yet
       try {
-        const [ctx, ags, svcs] = await Promise.all([Api.listContexts(), Api.listAgents(), Api.listServices()]);
+        const ctx = await Api.listContexts();
         setContexts(ctx && ctx.length ? ctx : fallbackContexts);
-        setAgents(ags);
-        setServices(Array.isArray(svcs) ? svcs : []);
-        // Load existing runs (started/processing)
-        try {
-          const runs = await Api.listRuns(['started','processing']);
-          const ids = runs.map((r: any) => r.id).filter(Boolean);
-          if (ids.length) setLiveRuns(prev => Array.from(new Set([...ids, ...prev])));
-          const map: Record<string, any[]> = {};
-          const svcMap: Record<string, string> = {};
-          const metaMap: Record<string, { status?: string; created_at?: string; service_id?: string }> = {};
-          for (const r of runs) {
-            const details = Array.isArray(r.details) ? r.details : [];
-            map[r.id] = details.map((d: any) => ({ type: d.event_type || d.type, timestamp: d.timestamp, ...d }));
-            if (r.service_id) svcMap[r.id] = r.service_id;
-            metaMap[r.id] = { status: r.status, created_at: r.created_at, service_id: r.service_id };
-          }
-          setLiveEvents(prev => ({ ...map, ...prev }));
-          if (Object.keys(svcMap).length) setRunServices(prev => ({ ...svcMap, ...prev }));
-          if (Object.keys(metaMap).length) setRunsMeta(prev => ({ ...metaMap, ...prev }));
-        } catch (e: any) {
-          setError(`Runs load failed: ${e.message || e}`);
-        }
-      } catch (e: any) {
-        // Fallback contexts if API not reachable yet
+      } catch {
         setContexts(fallbackContexts);
+      }
+
+      try {
+        const ags = await Api.listAgents();
+        setAgents(ags);
+      } catch (e: any) {
+        // Ignore 401 until user logs in
+        if (!String(e?.message || '').startsWith('401')) setError(e.message);
+        setAgents([]);
+      }
+
+      try {
+        const svcs = await Api.listServices();
+        setServices(Array.isArray(svcs) ? svcs : []);
+      } catch (e: any) {
         setError(e.message);
+      }
+
+      // Load existing runs (started/processing)
+      try {
+        const runs = await Api.listRuns(['started','processing']);
+        const ids = runs.map((r: any) => r.id).filter(Boolean);
+        if (ids.length) setLiveRuns(prev => Array.from(new Set([...ids, ...prev])));
+        const map: Record<string, any[]> = {};
+        const svcMap: Record<string, string> = {};
+        const metaMap: Record<string, { status?: string; created_at?: string; service_id?: string }> = {};
+        for (const r of runs) {
+          const details = Array.isArray(r.details) ? r.details : [];
+          map[r.id] = details.map((d: any) => ({ type: d.event_type || d.type, timestamp: d.timestamp, ...d }));
+          if (r.service_id) svcMap[r.id] = r.service_id;
+          metaMap[r.id] = { status: r.status, created_at: r.created_at, service_id: r.service_id };
+        }
+        setLiveEvents(prev => ({ ...map, ...prev }));
+        if (Object.keys(svcMap).length) setRunServices(prev => ({ ...svcMap, ...prev }));
+        if (Object.keys(metaMap).length) setRunsMeta(prev => ({ ...metaMap, ...prev }));
+      } catch (e: any) {
+        setError(`Runs load failed: ${e.message || e}`);
       }
     })();
   }, []);
@@ -316,6 +331,7 @@ export function App() {
             <div>
               <div style={{ fontWeight: 600 }}>{a.name}</div>
               <div style={{ fontSize: 12, color: '#666' }}>{a.model} · {a.context}</div>
+              {a.userId && (<div style={{ fontSize: 11, color: '#999' }}>owner: {a.userId}</div>)}
             </div>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
               <span className="badge">{a.status}</span>
@@ -474,6 +490,18 @@ export function App() {
         )}
         {page !== 'services' && (
         <div className="content">
+          {page === 'settings' && (
+            <>
+              <div className="card" style={{ marginBottom: 12 }}>
+                <div style={{ fontWeight: 600, marginBottom: 8 }}>API</div>
+                <div className="row" style={{ alignItems: 'center', gap: 8 }}>
+                  <span style={{ color: '#666' }}>Base URL</span>
+                  <input style={{ width: 360 }} value={apiUrl} onChange={(e) => { setApiUrl(e.target.value); setBaseUrl(e.target.value); }} />
+                </div>
+              </div>
+              <AuthPanel />
+            </>
+          )}
           {page === 'agents' && (
             <>
               <div className="card" style={{ marginBottom: 12 }}>

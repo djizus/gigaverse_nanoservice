@@ -1,12 +1,26 @@
 import type { AgentConfig, CreateAgentInput, Message, Session } from './types';
 
 let BASE_URL: string = (import.meta as any).env?.VITE_API_URL || 'http://localhost:4021';
+let AUTH_TOKEN: string | undefined;
+let DEV_USER_ID: string | undefined;
+
+export function setAuthToken(token?: string) {
+  AUTH_TOKEN = token || undefined;
+}
+
+export function setDevUserId(uid?: string) {
+  DEV_USER_ID = uid || undefined;
+}
 
 async function http<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE_URL}${path}`, {
+  const url = DEV_USER_ID
+    ? `${BASE_URL}${path}${path.includes('?') ? '&' : '?'}userId=${encodeURIComponent(DEV_USER_ID)}`
+    : `${BASE_URL}${path}`;
+  const res = await fetch(url, {
     ...init,
     headers: {
       'Content-Type': 'application/json',
+      ...(AUTH_TOKEN ? { Authorization: `Bearer ${AUTH_TOKEN}` } : {}),
       ...(init?.headers || {}),
     },
   });
@@ -56,9 +70,14 @@ export const Api = {
     payload: { message: string; sessionId?: string },
     onEvent: (ev: { type: 'start' | 'delta' | 'done'; sessionId?: string; delta?: string }) => void
   ): Promise<void> {
-    const res = await fetch(`${BASE_URL}/daydreams/agents/${agentId}/send/stream`, {
+    const base = `${BASE_URL}/daydreams/agents/${agentId}/send/stream`;
+    const url = DEV_USER_ID ? `${base}?userId=${encodeURIComponent(DEV_USER_ID)}` : base;
+    const res = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(AUTH_TOKEN ? { Authorization: `Bearer ${AUTH_TOKEN}` } : {}),
+      },
       body: JSON.stringify(payload),
     });
     if (!res.ok || !res.body) {

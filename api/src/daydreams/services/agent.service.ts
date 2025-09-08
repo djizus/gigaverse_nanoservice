@@ -8,11 +8,12 @@ export class AgentService {
   constructor(private storage: DaydreamsStorage, private llm?: DaydreamsAgentService) {}
 
   // Agents
-  listAgents(): Promise<AgentConfig[]> {
-    return this.storage.listAgents();
+  listAgents(userId?: string): Promise<AgentConfig[]> {
+    return this.storage.listAgents(userId ? { userId } : undefined);
   }
 
-  async createAgent(input: CreateAgentInput): Promise<AgentConfig> {
+  async createAgent(input: CreateAgentInput, opts?: { userId?: string }): Promise<AgentConfig> {
+    if (process.env.LOG_LEVEL === 'debug') console.log('[Daydreams][AgentService.createAgent] start userId(input)=', input.userId, 'userId(opts)=', opts?.userId);
     // Merge from template if provided
     let merged = { ...input } as CreateAgentInput;
     if (input.templateId && this.storage.getTemplateById) {
@@ -33,7 +34,8 @@ export class AgentService {
       }
     }
 
-    const agent = await this.storage.createAgent(merged);
+    const agent = await this.storage.createAgent(merged, opts);
+    if (process.env.LOG_LEVEL === 'debug') console.log('[Daydreams][AgentService.createAgent] storage created agent id=', agent.id, 'owner=', agent.userId);
     // Register agent runtime (linked to DaydreamsAgentService)
     try {
       if (input.routerApiKey) {
@@ -66,16 +68,16 @@ export class AgentService {
     return this.llm?.listRegisteredAgents() ?? [];
   }
 
-  getAgent(id: string): Promise<AgentConfig | null> {
-    return this.storage.getAgent(id);
+  getAgent(id: string, userId?: string): Promise<AgentConfig | null> {
+    return this.storage.getAgent(id, userId ? { userId } : undefined);
   }
 
-  deleteAgent(id: string): Promise<boolean> {
-    return this.storage.deleteAgent(id);
+  deleteAgent(id: string, userId?: string): Promise<boolean> {
+    return this.storage.deleteAgent(id, userId ? { userId } : undefined);
   }
 
   // Sessions
-  async ensureSession(agentId: string, sessionId?: string): Promise<Session> {
+  async ensureSession(agentId: string, sessionId?: string, _userId?: string): Promise<Session> {
     if (sessionId) {
       const existing = await this.storage.getSession(sessionId);
       if (existing) return existing;
@@ -83,7 +85,17 @@ export class AgentService {
     return this.storage.createSession(agentId);
   }
 
-  listAgentSessions(agentId: string) {
+  async getSession(sessionId: string, userId?: string) {
+    const session = await this.storage.getSession(sessionId);
+    if (!session) return null;
+    if (!userId) return session;
+    // Verify via agent ownership (since sessions don't carry user_id in DB)
+    const agent = await this.getAgent(session.agentId, userId);
+    if (!agent) return null;
+    return session;
+  }
+
+  listAgentSessions(agentId: string, _userId?: string) {
     return this.storage.listAgentSessions(agentId);
   }
 

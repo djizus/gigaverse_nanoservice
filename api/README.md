@@ -138,6 +138,10 @@ bun run test:deployed
 - `GET /daydreams/agents/:id/sessions` — List sessions for an agent
 - `GET /daydreams/sessions/:sessionId/messages` — List messages in a session
 
+Auth and user scoping:
+- These endpoints are user-scoped. Provide `Authorization: Bearer <supabase-jwt>`.
+- Dev mode: with `DAYDREAMS_USE_MEMORY=true`, you may use `X-User-Id: <uid>` header instead.
+
 Request example for creating an agent:
 
 ```json
@@ -161,6 +165,7 @@ Request example for sending a message:
 Notes:
 - PoC responses are stubbed without calling external LLMs. Persistence is backed by Supabase in production and falls back to in-memory when `DAYDREAMS_USE_MEMORY=true` (useful for tests/dev without DB).
 - Database schema for agents is in `database/daydreams.schema.sql`.
+ - Migration adds `user_id` on `agents` and `sessions` (see `database/migrations/20250908_user_scoping.sql`).
 
 
 ### Real-time Event Subscription

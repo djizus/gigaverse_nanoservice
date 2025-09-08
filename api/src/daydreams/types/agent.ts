@@ -14,6 +14,8 @@ export interface AgentConfig {
   stats?: any;
   instructions?: string;
   status: AgentStatus;
+  // Optional owner scoping
+  userId?: string;
   createdAt: string; // ISO timestamp
   updatedAt: string; // ISO timestamp
 }
@@ -34,6 +36,8 @@ export interface CreateAgentInput {
   mcpConfig?: any;
   // runtime-only: optional per-agent router API key (not persisted)
   routerApiKey?: string;
+  // Optional owner scoping
+  userId?: string;
 }
 
 export interface UpdateAgentInput {
