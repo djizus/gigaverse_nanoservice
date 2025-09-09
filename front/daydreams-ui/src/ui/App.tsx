@@ -2,9 +2,13 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Api, getBaseUrl, setBaseUrl } from '../api';
 import type { AgentConfig, Message, Session } from '../types';
 import { AuthPanel } from './AuthPanel';
+import { GigaverseTokenPanel } from './GigaverseTokenPanel';
+import { GlobalAgentProvider } from '../context/GlobalAgentProvider';
+import { AgentCommandBar } from '../components/AgentCommandBar';
+import { RunDetailChatPanel } from './run-detail-chat.panel';
 
 export function App() {
-  type Page = 'dashboard' | 'services' | 'runs' | 'agents' | 'settings';
+  type Page = 'dashboard' | 'services' | 'runs' | 'agents' | 'settings' ;
   const [theme, setTheme] = useState<'light'|'dark'>(() => {
     const saved = localStorage.getItem('theme');
     if (saved === 'light' || saved === 'dark') return saved;
@@ -62,6 +66,7 @@ export function App() {
   const [svcModalOpen, setSvcModalOpen] = useState(false);
   const [svcModalFor, setSvcModalFor] = useState<any | null>(null);
   const [profileName, setProfileName] = useState('');
+  // Service Workspace state
 
   // Load contexts and agents on boot
   useEffect(() => {
@@ -167,6 +172,46 @@ export function App() {
     })();
   }, [selectedSession?.id]);
 
+
+  // Helpers to navigate/open service workspace
+  async function createCompanionAgentForService(svc: any) {
+    try {
+      setLoading(true);
+      setError(null);
+      const baseName = `${svc.serviceId} Companion`;
+      // Reuse existing if name matches
+      let agent = (agents || []).find(a => (a.name||'').toLowerCase() === baseName.toLowerCase()) || null;
+      if (!agent) {
+        const context = (contexts.find(c => c === 'gigaverse') ?? contexts[0] ?? 'chat');
+        agent = await Api.createAgent({
+          name: baseName,
+          model: knownModels[0],
+          context,
+          description: `${svc.serviceId} service companion`,
+          instructions: `You are a companion agent for the ${svc.serviceId} service. Be concise and contextual.`,
+        });
+        setAgents(a => [agent!, ...a]);
+      }
+      setSelectedAgent(agent);
+      // Load sessions and pick the latest
+      try {
+        const sess = await Api.listSessions(agent!.id);
+        setSessions(sess);
+        setSelectedSession(sess[0] || null);
+      } catch {}
+      // Persist mapping to current run if any
+      try {
+        if (selectedRunId && agent) {
+          await Api.setRunCompanion(selectedRunId, { agentId: agent.id });
+        }
+      } catch {}
+    } catch (e:any) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
   // Subscribe to global dungeon events SSE
   useEffect(() => {
     let cancelled = false;
@@ -204,6 +249,7 @@ export function App() {
     return () => clearTimeout(t);
   }, [toast]);
 
+
   // Autoscroll to latest event when selected run updates
   useEffect(() => {
     if (!selectedRunId) return;
@@ -215,6 +261,27 @@ export function App() {
     }, 50);
     return () => clearTimeout(t);
   }, [selectedRunId, liveEvents[selectedRunId || '']]);
+
+
+  // Auto-link run companion (if mapping exists)
+  useEffect(() => {
+    (async () => {
+      if (!selectedRunId) return;
+      try {
+        const m = await Api.getRunCompanion(selectedRunId);
+        if (m?.agentId) {
+          try {
+            const a = await Api.getAgent(m.agentId);
+            setSelectedAgent(a);
+            const sess = await Api.listSessions(a.id);
+            setSessions(sess);
+            const current = (m.sessionId && sess.find(x => x.id === m.sessionId)) || sess[0] || null;
+            setSelectedSession(current);
+          } catch (e) { /* ignore */ }
+        }
+      } catch {}
+    })();
+  }, [selectedRunId]);
 
   async function handleCreateAgent(form: FormData) {
     try {
@@ -523,6 +590,11 @@ export function App() {
   }
 
   return (
+    <GlobalAgentProvider
+      navigate={(p)=> setPage(p)}
+      openServiceLauncher={(svc, initial)=>{ setSelectedService(svc?.serviceId || ''); setSvcModalFor(svc); if (initial) setNsForm(initial); setSvcModalOpen(true); setPage('services'); }}
+      focusAgentChat={(agentId)=>{ const a = agents.find(x => x.id === agentId) || null; if (a) { setSelectedAgent(a); setPage('agents'); } }}
+    >
     <div>
       <div className="header">
         <strong>Daydreams Control</strong>
@@ -593,8 +665,11 @@ export function App() {
                   <span style={{ color: '#666' }}>Base URL</span>
                   <input style={{ width: 360 }} value={apiUrl} onChange={(e) => { setApiUrl(e.target.value); setBaseUrl(e.target.value); }} />
                 </div>
+
               </div>
               <AuthPanel />
+              <div style={{ height: 8 }} />
+              <GigaverseTokenPanel />
             </>
           )}
           {page === 'agents' && (
@@ -754,13 +829,22 @@ export function App() {
                 <div style={{ color: '#666' }}>{selectedRunId}</div>
                 {runServices[selectedRunId] && (<span className="badge">{runServices[selectedRunId]}</span>)}
                 {runsMeta[selectedRunId]?.status && (<span className="badge">{runsMeta[selectedRunId]?.status}</span>)}
+                
                 <div style={{ marginLeft: 'auto' }} className="toolbar">
+                  {runServices[selectedRunId!] && (
+                    <button className="btn" onClick={() => {
+                      const svcId = runServices[selectedRunId!];
+                      const svc = (services || []).find((x:any) => x.serviceId === svcId) || null;
+                      if (svc) createCompanionAgentForService(svc);
+                    }}>Chat</button>
+                  )}
                   <button className="btn" onClick={() => { navigator.clipboard?.writeText(selectedRunId || ''); }}>Copy ID</button>
                   <button className="btn btn-danger" onClick={() => {
                     setLiveEvents(prev => ({ ...prev, [selectedRunId!]: [] }));
                   }}>Clear</button>
                   <button className="btn" onClick={() => setSelectedRunId(null)}>Close</button>
                 </div>
+
               </div>
               <div className="messages" style={{ maxHeight: 380 }} ref={detailRef}>
                 {(liveEvents[selectedRunId] || []).map((e, i) => {
@@ -822,13 +906,26 @@ export function App() {
                   <div style={{ color: '#666' }}>No events yet for this run.</div>
                 )}
               </div>
+              <RunDetailChatPanel
+                selectedAgent={selectedAgent}
+                sessions={sessions}
+                selectedSession={selectedSession}
+                messages={messages}
+                streaming={streaming}
+                SessionSelector={SessionSelector}
+                onUseCompanion={() => { const svcId = runServices[selectedRunId!]; const svc = (services||[]).find((x:any)=> x.serviceId === svcId); if (svc) createCompanionAgentForService(svc); }}
+                onSend={handleSendMessage}
+                onToggleStreaming={setStreaming}
+              />
             </div>
-          )}
-          </div>
+        )}
+      </div>
         )}
       </div>
       <ServiceModal />
+      <AgentCommandBar />
     </div>
+    </GlobalAgentProvider>
   );
 }
 

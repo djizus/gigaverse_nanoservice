@@ -38,6 +38,10 @@ export class GigaverseFishingServicePlugin implements ServicePlugin {
   async call(op: string, data: any) {
     switch (op) {
       case 'startRun': {
+        // TODO[orchestrator-mapping]:
+        // - Create/ensure a per-service orchestrator agent (e.g., "Fishing Orchestrator")
+        // - Ensure a session and persist { agentId, sessionId } into run.meta via DatabaseService
+        // - Surface { agentId, sessionId } in the HTTP response
         const runType = String(data?.runType || '').toLowerCase();
         if (!['small','normal','big'].includes(runType)) throw new Error('runType must be small|normal|big');
         if (!data?.playerAddress) throw new Error('playerAddress required');

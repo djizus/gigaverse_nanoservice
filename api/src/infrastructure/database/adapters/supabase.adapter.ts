@@ -165,7 +165,29 @@ export class SupabaseAdapter implements IDatabaseAdapter {
     } catch {}
   }
 
-  async createRunLog(input: any): Promise<DatabaseResult<any>> {
+  
+  async setRunMeta(id: string, meta: Record<string, any>): Promise<DatabaseResult<SummaryRun>> {
+    try {
+      const { data: existing, error: e1 } = await this.supabase
+        .from('run_summaries_simple')
+        .select('meta')
+        .eq('id', id)
+        .single();
+      if (e1) return { success: false, error: e1.message };
+      const merged = { ...((existing?.meta as any) || {}), ...(meta||{}) };
+      const { data, error } = await this.supabase
+        .from('run_summaries_simple')
+        .update({ meta: merged })
+        .eq('id', id)
+        .select('*')
+        .single();
+      if (error) return { success: false, error: error.message };
+      return { success: true, data: data as any };
+    } catch (error) {
+      return { success: false, error: String(error) };
+    }
+  }
+async createRunLog(input: any): Promise<DatabaseResult<any>> {
     const id = crypto.randomUUID?.() || String(Date.now());
     const runLog = { id, dungeon_run_id: input.dungeon_run_id, run_number: input.run_number, status: 'started', rooms_cleared: 0, battles_won: 0, battles_lost: 0, items_gained: 0, moves: [], loot_choices: [], player_stats: null, start_time: new Date().toISOString(), end_time: null, error_message: null };
     return { success: true, data: runLog };

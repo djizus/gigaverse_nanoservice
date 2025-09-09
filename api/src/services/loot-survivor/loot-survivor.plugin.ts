@@ -51,6 +51,10 @@ export class LootSurvivorServicePlugin implements ServicePlugin {
         return { content: inline, tokens: ctx.tokens };
       }
       case 'startRun': {
+        // TODO[orchestrator-mapping]: read-only
+        // - Optionally attach a lightweight companion agent for commentary
+        // - Persist { agentId, sessionId } in run.meta for chat linkage
+        // - Surface mapping in response
         // Read-only: create a run and log context snapshot, then complete
         const gameId = Number(data?.gameId);
         if (!gameId) throw new Error('gameId required');

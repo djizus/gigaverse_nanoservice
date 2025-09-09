@@ -27,6 +27,10 @@ export class DatabaseService {
     return this.adapter.getRun(id);
   }
 
+  async setRunMeta(id: string, meta: Record<string, any>): Promise<DatabaseResult<SummaryRun>> {
+    return this.adapter.setRunMeta(id, meta);
+  }
+
   async listRuns(opts: { status?: SummaryRun['status'][], limit?: number, serviceId?: string, developer?: string } = {}): Promise<DatabaseResult<SummaryRun[]>> {
     return this.adapter.listRuns(opts);
   }

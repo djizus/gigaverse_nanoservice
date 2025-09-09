@@ -43,6 +43,10 @@ export class VegaTradingServicePlugin implements ServicePlugin {
   async call(op: string, data: any) {
     switch (op) {
       case 'startRun': {
+        // TODO[orchestrator-mapping]:
+        // - Create/ensure a "Vega Trading Orchestrator" agent for signal runs
+        // - Ensure a session and persist { agentId, sessionId } into run.meta via DatabaseService
+        // - Surface mapping in the HTTP response for UI auto-linking
         const symbol = String(data?.symbol || '').trim();
         if (!symbol) throw new Error('symbol required');
         const timeframes = ['15m','1h','4h','1d'] as const;

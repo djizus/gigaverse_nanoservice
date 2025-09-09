@@ -146,6 +146,16 @@ export const Api = {
   getRun(id: string): Promise<{ summary: any; details: any[] }> {
     return http(`/ui/dungeon/run/${id}`);
   }
+
+  ,
+  // Run ↔ Companion mapping
+  getRunCompanion(id: string): Promise<{ agentId?: string|null; sessionId?: string|null }> {
+    return http(`/ui/run/${id}/companion`);
+  }
+  ,
+  setRunCompanion(id: string, payload: { agentId?: string; name?: string; routerApiKey?: string }): Promise<{ agentId: string; sessionId: string }> {
+    return http(`/ui/run/${id}/companion`, { method: 'POST', body: JSON.stringify(payload) });
+  }
 };
 
 export function getBaseUrl() {

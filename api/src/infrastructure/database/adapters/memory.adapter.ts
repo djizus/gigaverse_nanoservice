@@ -51,6 +51,16 @@ export class MemoryAdapter implements IDatabaseAdapter {
     return { success: true, data: run };
   }
 
+  async setRunMeta(id: string, meta: Record<string, any>) : Promise<DatabaseResult<SummaryRun>> {
+    const run = this.runs.get(id);
+    if (!run) return { success: false, error: 'Run not found' };
+    const merged = { ...(run.meta || {}), ...(meta||{}) };
+    const updated: SummaryRun = { ...run, meta: merged, updated_at: new Date().toISOString() } as any;
+    this.runs.set(id, updated);
+    return { success: true, data: updated };
+  }
+
+
   async listRuns(opts: { status?: SummaryRun['status'][]; limit?: number; serviceId?: string; developer?: string } = {}): Promise<DatabaseResult<SummaryRun[]>> {
     let list = Array.from(this.runs.values());
     if (opts.status && opts.status.length) list = list.filter(r => opts.status!.includes(r.status));

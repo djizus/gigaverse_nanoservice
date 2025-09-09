@@ -83,7 +83,7 @@ export class DungeonController {
       if (!validationResult.success) {
         return c.json({ 
           error: "Invalid request", 
-          details: validationResult.error.errors 
+          details: validationResult.error.issues 
         }, 400);
       }
 

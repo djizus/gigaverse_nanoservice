@@ -117,7 +117,7 @@ export async function createApp(deps: AppDeps) {
   app.route('/', createHealthRoutes());
   app.route('/', createGameRoutes(dungeonController, deps.paymentConfig, databaseService));
   app.route('/', createDungeonEventsRoutes());
-  app.route('/', createDungeonUiRoutes(dungeonController, databaseService));
+  app.route('/', createDungeonUiRoutes(dungeonController, databaseService, agentService));
   // Auth for user-scoped Daydreams routes (keep /daydreams/contexts public)
   const userAuth = createUserAuthMiddleware({
     supabaseUrl: deps.supabaseConfig.url,
@@ -142,7 +142,7 @@ export async function createApp(deps: AppDeps) {
   // Service Registry (namespaced services)
   const registry = new ServiceRegistry();
   // Register Gigaverse Dungeon plugin (renamed)
-  const gvPlugin = new GigaverseServicePlugin({ developer: 'daydreams', database: databaseService, agent: daydreamsAgent });
+  const gvPlugin = new GigaverseServicePlugin({ developer: 'daydreams', database: databaseService, agent: daydreamsAgent, agents: agentService, orchestratorAgentName: process.env.GIGAVERSE_DUNGEON_AGENT_NAME || 'Gigaverse Agent' });
   await gvPlugin.init();
   registry.register(gvPlugin);
   // Register Gigaverse Fishing plugin

@@ -23,6 +23,8 @@ export interface IDatabaseAdapter {
   createRun(input: CreateDungeonRunInput, opts?: { serviceId?: string; developer?: string; meta?: Record<string, any> }): Promise<DatabaseResult<SummaryRun>>;
   updateRun(id: string, input: UpdateDungeonRunInput): Promise<DatabaseResult<SummaryRun>>;
   getRun(id: string): Promise<DatabaseResult<SummaryRun>>;
+  // Merge partial meta into existing run.meta
+  setRunMeta(id: string, meta: Record<string, any>): Promise<DatabaseResult<SummaryRun>>;
   listRuns(opts?: { status?: SummaryRun['status'][]; limit?: number; serviceId?: string; developer?: string }): Promise<DatabaseResult<SummaryRun[]>>;
   getActiveRunForPlayer(playerAddress: string): Promise<DatabaseResult<SummaryRun | null>>;
   completeRun(dungeonRunId: string, completedRuns: number): Promise<void>;
