@@ -8,7 +8,7 @@ import { AgentCommandBar } from '../components/AgentCommandBar';
 import { RunDetailChatPanel } from './run-detail-chat.panel';
 
 export function App() {
-  type Page = 'dashboard' | 'services' | 'runs' | 'agents' | 'settings' ;
+  type Page = 'dashboard' | 'services' | 'runs' | 'runs2' | 'agents' | 'settings' ;
   const [theme, setTheme] = useState<'light'|'dark'>(() => {
     const saved = localStorage.getItem('theme');
     if (saved === 'light' || saved === 'dark') return saved;
@@ -66,6 +66,7 @@ export function App() {
   const [svcModalOpen, setSvcModalOpen] = useState(false);
   const [svcModalFor, setSvcModalFor] = useState<any | null>(null);
   const [profileName, setProfileName] = useState('');
+  const [runs2Collapsed, setRuns2Collapsed] = useState(false);
   // Service Workspace state
 
   // Load contexts and agents on boot
@@ -602,6 +603,7 @@ export function App() {
           <button className="btn" onClick={() => setPage('dashboard')}>Dashboard</button>
           <button className="btn" onClick={() => setPage('services')}>Services</button>
           <button className="btn" onClick={() => setPage('runs')}>Runs</button>
+          <button className="btn" onClick={() => setPage('runs2')}>Run 2</button>
           <button className="btn" onClick={() => setPage('agents')}>Agents</button>
           <button className="btn" onClick={() => setPage('settings')}>Settings</button>
         </div>
@@ -614,6 +616,83 @@ export function App() {
         {toast && <span className="badge" style={{ background: '#dcfce7', borderColor:'#bbf7d0', color:'#166534' }}>{toast}</span>}
       </div>
       <div className="container">
+
+        {page === 'runs2' && (
+          <div className="content" style={{ padding: 0 }}>
+            <div className="row" style={{ alignItems:'stretch', height: 'calc(100vh - 120px)' }}>
+              {/* Sidebar */}
+              <div style={{ width: runs2Collapsed ? 0 : 280, transition: 'width 0.2s ease', borderRight: '1px solid var(--border)', overflow:'hidden' }}>
+                <div className="row" style={{ alignItems:'center', padding: 8, gap: 8, borderBottom: '1px solid var(--border)' }}>
+                  <strong>Runs</strong>
+                  <button className="btn" onClick={() => setRuns2Collapsed(true)} style={{ marginLeft:'auto' }}>{runs2Collapsed ? '»' : '«'}</button>
+                </div>
+                <div style={{ padding: 8 }}>
+                  <div className="row" style={{ gap: 6, marginBottom: 6 }}>
+                    <button className="btn" onClick={async ()=>{
+                      try {
+                        setLoading(true);
+                        const runs = await Api.listRuns();
+                        const ids = runs.map((r:any)=>r.id).filter(Boolean);
+                        setLiveRuns(ids);
+                        const meta: Record<string, any> = {}; const svcMap: Record<string, string> = {};
+                        for (const r of runs) { meta[r.id] = { status: r.status, created_at: r.created_at, service_id: r.service_id }; if (r.service_id) svcMap[r.id]=r.service_id; }
+                        setRunsMeta(meta); setRunServices(svcMap);
+                      } finally { setLoading(false); }
+                    }}>Refresh</button>
+                  </div>
+                  <div style={{ maxHeight: 'calc(100vh - 180px)', overflow: 'auto' }}>
+                    {liveRuns.length === 0 && <div style={{ color:'#666' }}>No runs.</div>}
+                    {liveRuns.map((rid) => (
+                      <div key={rid} className="card" style={{ marginBottom: 8, cursor:'pointer', borderColor: selectedRunId===rid ? '#93c5fd' : undefined }} onClick={()=> setSelectedRunId(rid)}>
+                        <div style={{ fontWeight:600, fontSize: 13, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{rid}</div>
+                        <div style={{ display:'flex', gap:6, alignItems:'center', color:'#666', fontSize:12 }}>
+                          {runServices[rid] && (<span className="badge">{runServices[rid]}</span>)}
+                          {runsMeta[rid]?.status && (<span className="badge">{runsMeta[rid]?.status}</span>)}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              {/* Main */}
+              <div style={{ flex: 1, display:'flex', flexDirection:'column' }}>
+                <div className="row" style={{ alignItems:'center', padding: 8, gap: 8, borderBottom: '1px solid var(--border)' }}>
+                  <button className="btn" onClick={() => setRuns2Collapsed(v=>!v)}>{runs2Collapsed ? 'Show List' : 'Hide List'}</button>
+                  <div style={{ fontWeight: 600 }}>Run 2</div>
+                  {selectedRunId && (
+                    <>
+                      <span style={{ color:'#666' }}>{selectedRunId}</span>
+                      {runServices[selectedRunId] && (<span className="badge">{runServices[selectedRunId]}</span>)}
+                      {runsMeta[selectedRunId]?.status && (<span className="badge">{runsMeta[selectedRunId]?.status}</span>)}
+                    </>
+                  )}
+                  <div style={{ marginLeft:'auto' }} className="toolbar">
+                    {selectedRunId && (
+                      <button className="btn" onClick={()=>{ try { navigator.clipboard?.writeText(selectedRunId); setToast('Copied'); } catch {} }}>Copy ID</button>
+                    )}
+                  </div>
+                </div>
+                <div style={{ padding: 12, flex: 1, overflow:'auto' }}>
+                  {!selectedRunId && <div style={{ color:'#666' }}>Select a run to view chat.</div>}
+                  {selectedRunId && (
+                    <RunDetailChatPanel
+                      selectedAgent={selectedAgent}
+                      sessions={sessions}
+                      selectedSession={selectedSession}
+                      messages={messages}
+                      streaming={streaming}
+                      SessionSelector={SessionSelector}
+                      onUseCompanion={() => { const svcId = runServices[selectedRunId!]; const svc = (services||[]).find((x:any)=> x.serviceId === svcId); if (svc) createCompanionAgentForService(svc); }}
+                      onSend={handleSendMessage}
+                      onToggleStreaming={setStreaming}
+                    />
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {page === 'services' && (
           <div className="content">
             <div className="row" style={{ alignItems:'center', marginBottom: 8 }}>
