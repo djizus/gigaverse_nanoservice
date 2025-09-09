@@ -19,6 +19,7 @@ export default function RunsRoute() {
   const [filterStatus, setFilterStatus] = React.useState('')
   const [loading, setLoading] = React.useState(false)
   const [toast, setToast] = React.useState<string | null>(null)
+  const [runsCollapsed, setRunsCollapsed] = React.useState(false)
 
   React.useEffect(() => {
     (async () => {
@@ -167,111 +168,85 @@ export default function RunsRoute() {
     } finally { setLoading(false) }
   }
 
+
   return (
-    <div className="card">
-      <div className="row" style={{ alignItems:'center', marginBottom: 8 }}>
-        <div style={{ fontWeight: 600 }}>Live Runs</div>
-        <div style={{ marginLeft:'auto' }} className="row">
-          <select value={filterService} onChange={(e)=> setFilterService(e.target.value)}>
-            <option value="">All services</option>
-            {Array.from(new Set(Object.values(runServices))).map(svc => (<option key={svc} value={svc}>{svc}</option>))}
-          </select>
-          <select value={filterStatus} onChange={(e)=> setFilterStatus(e.target.value)}>
-            <option value="">All status</option>
-            <option value="started">started</option>
-            <option value="processing">processing</option>
-            <option value="completed">completed</option>
-            <option value="failed">failed</option>
-            <option value="aborted">aborted</option>
-          </select>
-          <button className="btn" onClick={async ()=>{
-            setLoading(true)
-            try {
-              const runs = await Api.listRuns()
-              const ids = runs.map((r:any)=>r.id).filter(Boolean)
-              setLiveRuns(ids)
-              const meta: Record<string, any> = {}; const svcMap: Record<string, string> = {}
-              for (const r of runs) { meta[r.id] = { status:(r as any).status, created_at:(r as any).created_at, service_id:(r as any).service_id }; if ((r as any).service_id) svcMap[r.id]=(r as any).service_id }
-              setRunsMeta(meta); setRunServices(svcMap)
-            } finally { setLoading(false) }
-          }}>{loading ? 'Loading…' : 'Refresh'}</button>
+    <div className="row" style={{ alignItems:'stretch', height: 'calc(100vh - 120px)' }}>
+      {/* Sidebar: live runs */}
+      <div style={{ width: runsCollapsed ? 0 : 320, transition:'width 0.2s ease', borderRight:'1px solid var(--border)', overflow:'hidden', display:'flex', flexDirection:'column' }}>
+        <div className="row" style={{ alignItems:'center', padding: 8, gap: 8, borderBottom:'1px solid var(--border)' }}>
+          <strong>Runs</strong>
+          <button className="btn" onClick={()=> setRunsCollapsed(true)} style={{ marginLeft:'auto' }}>{runsCollapsed ? '»' : '«'}</button>
+        </div>
+        <div style={{ padding: 8 }}>
+          <div className="row" style={{ gap: 6, marginBottom: 8, alignItems:'center' }}>
+            <select value={filterService} onChange={(e)=> setFilterService(e.target.value)}>
+              <option value="">All services</option>
+              {Array.from(new Set(Object.values(runServices))).map(svc => (<option key={svc} value={svc}>{svc}</option>))}
+            </select>
+            <select value={filterStatus} onChange={(e)=> setFilterStatus(e.target.value)}>
+              <option value="">All status</option>
+              <option value="started">started</option>
+              <option value="processing">processing</option>
+              <option value="completed">completed</option>
+              <option value="failed">failed</option>
+              <option value="aborted">aborted</option>
+            </select>
+            <button className="btn" onClick={async ()=>{ setLoading(true); try { const runs = await Api.listRuns(); const ids = runs.map((r:any)=>r.id).filter(Boolean); setLiveRuns(ids); const meta: any = {}; const svcMap: any = {}; for (const r of runs) { meta[r.id] = { status:(r as any).status, created_at:(r as any).created_at, service_id:(r as any).service_id }; if ((r as any).service_id) svcMap[r.id]=(r as any).service_id } setRunsMeta(meta); setRunServices(svcMap) } finally { setLoading(false) } }}>{loading?'Loading…':'Refresh'}</button>
+          </div>
+          {toast && (<div className="badge" style={{ background:'#dcfce7', borderColor:'#bbf7d0', color:'#166534', marginBottom:8 }}>{toast}</div>)}
+          <div className="card" style={{ maxHeight: 'calc(100vh - 220px)', overflow:'auto' }}>
+            {liveRuns.filter(rid => { if (filterService && runServices[rid] !== filterService) return false; if (filterStatus && (runsMeta[rid]?.status !== filterStatus)) return false; return true }).map(rid => { const evts = events[rid] || []; const last = evts[evts.length-1]; const ts = last ? new Date(last.timestamp || Date.now()).toLocaleTimeString() : null; return (
+              <div key={rid} className="row" style={{ alignItems:'center', gap:6, padding:'6px 4px', borderBottom:'1px solid var(--border)', cursor:'pointer', background: selectedRunId===rid ? '#0f141b' : undefined }} onClick={()=> { try { localStorage.setItem('lastRunId', rid) } catch {}; setSelectedRunId(rid) }}>
+                <div style={{ fontWeight: 600, fontSize: 12, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{rid.slice(0,8)}…</div>
+                {runServices[rid] && (<span className="badge">{runServices[rid]}</span>)}
+                {runsMeta[rid]?.status && (<span className="badge">{runsMeta[rid]?.status}</span>)}
+              </div>
+            )})}
+            {liveRuns.length===0 && <div style={{ color:'#9ca3af' }}>No runs.</div>}
+          </div>
         </div>
       </div>
-      {toast && (<div className="badge" style={{ background:'#dcfce7', borderColor:'#bbf7d0', color:'#166534' }}>{toast}</div>)}
-      <div>
-        {liveRuns.filter(rid => {
-          if (filterService && runServices[rid] !== filterService) return false
-          if (filterStatus && (runsMeta[rid]?.status !== filterStatus)) return false
-          return true
-        }).length === 0 && (
-          <div style={{ color:'#9ca3af' }}>No runs yet.</div>
-        )}
-        {liveRuns.filter(rid => {
-          if (filterService && runServices[rid] !== filterService) return false
-          if (filterStatus && (runsMeta[rid]?.status !== filterStatus)) return false
-          return true
-        }).map(rid => {
-          const evts = events[rid] || []
-          const last = evts[evts.length - 1]
-          const ts = last ? new Date(last.timestamp || Date.now()).toLocaleTimeString() : null
-          return (
-            <div key={rid} className="row" style={{ alignItems:'center', padding:'8px 6px', borderBottom:'1px solid var(--border)' }}>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis' }}>{rid}</div>
-                <div style={{ fontSize: 12, color: '#9ca3af', display: 'flex', gap: 8, alignItems: 'center' }}>
-                  <span>{last ? `${last.type || last.event_type} · ${ts}` : (runsMeta[rid]?.status || 'waiting…')}</span>
-                  {runServices[rid] && (<span className="badge">{runServices[rid]}</span>)}
-                  {runsMeta[rid]?.status && (<span className="badge">{runsMeta[rid]?.status}</span>)}
-                  {last && (<span className="badge">{summarize(last)}</span>)}
-                </div>
-              </div>
-              <div className="row">
-                <button className="btn" onClick={() => { try { localStorage.setItem('lastRunId', rid) } catch {}; setSelectedRunId(rid) }}>Open</button>
-              </div>
-            </div>
-          )
-        })}
-      </div>
-      {selectedRunId && (
-        <div className="card" style={{ marginTop: 12 }} >
-          <div className="row" style={{ alignItems:'center' }} >
-            <div style={{ fontWeight: 600 }} >Run Detail</div>
-            <div style={{ color:'#9ca3af' }} >{selectedRunId}</div>
-            {runServices[selectedRunId] && (<span className="badge">{runServices[selectedRunId]}</span>)}
-            {runsMeta[selectedRunId]?.status && (<span className="badge">{runsMeta[selectedRunId]?.status}</span>)}
+
+      {/* Main split: left=Run Detail, right=Chat */}
+      <div style={{ flex: 1, display:'flex', gap: 12, minWidth:0 }}>
+        {/* Run Detail (left) */}
+        <div style={{ flex: 1, display:'flex', flexDirection:'column', minWidth:0 }}>
+          <div className="row" style={{ alignItems:'center', padding: 8, gap: 8, borderBottom:'1px solid var(--border)' }}>
+            <button className="btn" onClick={()=> setRunsCollapsed(v=>!v)}>{runsCollapsed ? 'Show List' : 'Hide List'}</button>
+            <div style={{ fontWeight: 600 }}>Run Detail</div>
+            {selectedRunId && (<><span style={{ color:'#9ca3af' }}>{selectedRunId}</span>{runServices[selectedRunId] && (<span className="badge">{runServices[selectedRunId]}</span>)}{runsMeta[selectedRunId]?.status && (<span className="badge">{runsMeta[selectedRunId]?.status}</span>)}</>)}
             <div style={{ marginLeft:'auto' }} className="row">
-              <button className="btn" onClick={()=> { try { if (selectedRunId) navigator.clipboard?.writeText(selectedRunId) } catch {} }}>Copy ID</button>
-              <button className="btn" onClick={()=> setSelectedRunId(null)}>Close</button>
+              {selectedRunId && (<button className="btn" onClick={()=> { try { navigator.clipboard?.writeText(selectedRunId!) } catch {} }}>Copy ID</button>)}
+              {selectedRunId && (<button className="btn" onClick={()=> setSelectedRunId(null)}>Close</button>)}
             </div>
           </div>
-          <div className="messages" style={{ maxHeight: 360 }} >
-            {(events[selectedRunId] || []).map((e,i) => {
-              const ts = new Date(e.timestamp || Date.now()).toLocaleTimeString()
-              const typ = e.type || e.event_type
-              return (
-                <div key={i} className={`msg assistant`}>
-                  <div className="meta">{typ} · {ts}</div>
-                  <div className="bubble">{summarize(e)}</div>
-                </div>
-              )
-            })}
-            {(events[selectedRunId] || []).length === 0 && (<div style={{ color:'#9ca3af' }} >No events yet.</div>)}
-          </div>
-          <div style={{ marginTop: 12 }} >
-            <RunChat
-              selectedAgent={selectedAgent}
-              sessions={sessions}
-              selectedSession={selectedSession}
-              messages={messages}
-              streaming={streaming}
-              SessionSelector={SessionSelector}
-              onUseCompanion={attachCompanion}
-              onSend={send}
-              onToggleStreaming={setStreaming}
-            />
+          <div className="messages" style={{ flex:1, minHeight:0 }}>
+            {!selectedRunId && (<div style={{ color:'#9ca3af' }}>Select a run to view events.</div>)}
+            {selectedRunId && ((events[selectedRunId] || []).map((e,i) => { const ts = new Date(e.timestamp || Date.now()).toLocaleTimeString(); const typ = e.type || e.event_type; return (
+              <div key={i} className={`msg assistant`}>
+                <div className="meta">{typ} · {ts}</div>
+                <div className="bubble">{summarize(e)}</div>
+              </div>
+            )}))}
           </div>
         </div>
-      )}
+        {/* Chat (right) */}
+        <div style={{ width: 460 }}>
+          <RunChat
+            selectedAgent={selectedAgent}
+            sessions={sessions}
+            selectedSession={selectedSession}
+            messages={messages}
+            streaming={streaming}
+            SessionSelector={SessionSelector}
+            onUseCompanion={attachCompanion}
+            onSend={send}
+            onToggleStreaming={setStreaming}
+          />
+        </div>
+      </div>
     </div>
   )
 }
+
+

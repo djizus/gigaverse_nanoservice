@@ -37,7 +37,6 @@ const RootComponent: React.FC = () => {
         >
           {neonTheme ? '🌙 Default' : '💚 Neon'}
         </button>
-        <Link to="/runs2" className="btn">Run 2</Link>
         <Link to="/runs" className="btn">Runs</Link>
         <Link to="/services" className="btn">Services</Link>
         <Link to="/agents" className="btn">Agents</Link>
@@ -54,13 +53,12 @@ const rootRoute = createRootRoute({ component: RootComponent })
 
 // Index -> redirect to /runs2
 const Index = () => {
-  React.useEffect(() => { window.location.replace('#/runs2'); }, [])
+  React.useEffect(() => { window.location.replace('/runs'); }, [])
   return <div />
 }
 const indexRoute = createRoute({ getParentRoute: () => rootRoute, path: '/', component: Index })
 
 // Lazy features
-const Runs2 = React.lazy(() => import('./routes/runs2'))
 const Runs = React.lazy(() => import('./routes/runs'))
 const Settings = React.lazy(() => import('./routes/settings'))
 const Services = React.lazy(() => import('./routes/services'))
@@ -68,11 +66,6 @@ const ServiceWorkspace = React.lazy(() => import('./routes/service-workspace'))
 const Agents = React.lazy(() => import('./routes/agents'))
 const Login = React.lazy(() => import('./routes/login'))
 
-const runs2Route = createRoute({ getParentRoute: () => rootRoute, path: '/runs2', component: () => (
-  <React.Suspense fallback={<div>Loading…</div>}>
-    <Runs2 />
-  </React.Suspense>
-)})
 const runsRoute = createRoute({ getParentRoute: () => rootRoute, path: '/runs', component: () => (
   <React.Suspense fallback={<div>Loading…</div>}>
     <Runs />
@@ -106,7 +99,7 @@ const loginRoute = createRoute({ getParentRoute: () => rootRoute, path: '/login'
   </React.Suspense>
 )})
 
-const routeTree = rootRoute.addChildren([indexRoute, runsRoute, runs2Route, settingsRoute, servicesRoute, serviceWorkspaceRoute, agentsRoute, loginRoute])
+const routeTree = rootRoute.addChildren([indexRoute, runsRoute, settingsRoute, servicesRoute, serviceWorkspaceRoute, agentsRoute, loginRoute])
 
 const router = createRouter({ routeTree, defaultPreload: 'intent', basepath: '' })
 
