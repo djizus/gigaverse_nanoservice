@@ -146,15 +146,15 @@ export async function createApp(deps: AppDeps) {
   await gvPlugin.init();
   registry.register(gvPlugin);
   // Register Gigaverse Fishing plugin
-  const gvFishing = new GigaverseFishingServicePlugin({ developer: 'daydreams', database: databaseService, agent: daydreamsAgent });
+  const gvFishing = new GigaverseFishingServicePlugin({ developer: 'daydreams', database: databaseService, agent: daydreamsAgent, agents: agentService });
   await gvFishing.init();
   registry.register(gvFishing);
   // Register Loot Survivor plugin (read-only)
-  const lsPlugin = new LootSurvivorServicePlugin({ developer: 'daydreams', database: databaseService });
+  const lsPlugin = new LootSurvivorServicePlugin({ developer: 'daydreams', database: databaseService, agents: agentService });
   await lsPlugin.init();
   registry.register(lsPlugin);
   // Register Vega Trading plugin
-  const vega = new VegaTradingServicePlugin({ developer: 'daydreams', database: databaseService, agent: daydreamsAgent });
+  const vega = new VegaTradingServicePlugin({ developer: 'daydreams', database: databaseService, agent: daydreamsAgent, agents: agentService });
   await vega.init();
   registry.register(vega);
   app.route('/', createServicesRoutes(registry));

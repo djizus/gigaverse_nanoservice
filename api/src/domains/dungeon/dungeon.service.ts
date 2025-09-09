@@ -247,6 +247,7 @@ export class DungeonService {
     const statsTally: Record<string, number> = {};
     const moves: string[] = [];
     const lootChoices: string[] = [];
+    const logger = new RunLogger(this.databaseService, dungeonRunId, runLog.id);
 
     try {
       // Step 1: Check for existing run or start new one
@@ -715,6 +716,38 @@ export class DungeonService {
             startResponse = await gameClient.startRun(startPayload);
           }
         } catch {}
+        // Secondary retry with short backoff even if no new token was returned
+        if (!startResponse.success) {
+          console.log(`[InitDebug] Backing off and retrying startRun once more...`);
+          await sleep(200);
+          startResponse = await gameClient.startRun(startPayload);
+        }
+        // Fallback: attempt resume_run to bootstrap server-side tracking, then start_run again
+        if (!startResponse.success) {
+          try {
+            console.log(`[InitDebug] Trying resume_run bootstrap...`);
+            const resume = await gameClient.resumeDungeon(dungeonId);
+            console.log(`[InitDebug] resume_run success=${!!resume?.success} message=${resume?.message}`);
+            await sleep(150);
+            startResponse = await gameClient.startRun(startPayload);
+          } catch (e) {
+            console.log(`[InitDebug] resume_run attempt failed: ${String((e as any)?.message || e)}`);
+          }
+        }
+        // Final check: if still failing, see if upstream state indicates a run we can parse
+        if (!startResponse.success) {
+          try {
+            const status3 = await gameClient.fetchDungeonState();
+            if (status3?.success && status3?.data?.run) {
+              console.log(`[InitDebug] Upstream shows a run after errors; parsing as resumed.`);
+              const s = parseDungeonState(status3);
+              if (s) {
+                await logger.emit('run_started', `Resuming existing run post-boot`, { resumed: true, room: s.currentRoom });
+                return { dungeonState: s, isResumed: true };
+              }
+            }
+          } catch {}
+        }
         if (!startResponse.success) {
           throw new Error(`Failed to start run: ${startResponse.message}`);
         }

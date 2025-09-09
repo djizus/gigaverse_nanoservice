@@ -153,7 +153,20 @@ export class GigaverseGameClient extends GigaverseHttpClient {
       ...payload
     };
     
-    return this.makeRequest('/game/dungeon/action', actionPayload);
+    // First attempt
+    let response = await this.makeRequest('/game/dungeon/action', actionPayload);
+    
+    // Single retry if server returns a corrective actionToken
+    if (!response.success &&
+        (response as any).actionToken) {
+      console.log(`[GigaverseClient] Retrying startRun with server token: ${(response as any).actionToken}`);
+      response = await this.makeRequest('/game/dungeon/action', {
+        ...actionPayload,
+        actionToken: (response as any).actionToken
+      });
+    }
+    
+    return response;
   }
 
   /**
@@ -289,8 +302,10 @@ export class GigaverseGameClient extends GigaverseHttpClient {
    * Resume an existing dungeon run from current state
    */
   async resumeDungeon(dungeonId: number): Promise<GigaverseApiResponse> {
+    const finalToken = this.getActionToken() ?? "";
     const resumePayload = {
       action: "resume_run",
+      actionToken: finalToken,
       dungeonId,
       data: {
         consumables: [],
@@ -299,9 +314,19 @@ export class GigaverseGameClient extends GigaverseHttpClient {
         isJuiced: false,
         gearInstanceIds: []
       }
-    };
+    } as any;
     
-    return this.makeRequest('/game/dungeon/action', resumePayload);
+    // First attempt
+    let response = await this.makeRequest('/game/dungeon/action', resumePayload);
+    
+    if (!response.success && (response as any).actionToken) {
+      console.log(`[GigaverseClient] Retrying resume_run with server token: ${(response as any).actionToken}`);
+      response = await this.makeRequest('/game/dungeon/action', {
+        ...resumePayload,
+        actionToken: (response as any).actionToken
+      });
+    }
+    return response;
   }
 
   /**
