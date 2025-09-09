@@ -60,6 +60,7 @@ const RootComponent: React.FC = () => {
           {neonTheme ? '🌙 Default' : '💚 Neon'}
         </button>
         <Link to="/runs" className="btn">Runs</Link>
+        <Link to="/my-agent" className="btn">Chat</Link>
         <Link to="/services" className="btn">Services</Link>
         <Link to="/agents" className="btn">Agents</Link>
         <Link to="/settings" className="btn">Settings</Link>
@@ -92,6 +93,7 @@ const indexRoute = createRoute({ getParentRoute: () => rootRoute, path: '/', com
 
 // Lazy features
 const Runs = React.lazy(() => import('./routes/runs'))
+const MyAgent = React.lazy(() => import('./routes/my-agent'))
 const Settings = React.lazy(() => import('./routes/settings'))
 const Services = React.lazy(() => import('./routes/services'))
 const ServiceWorkspace = React.lazy(() => import('./routes/service-workspace'))
@@ -113,6 +115,11 @@ const servicesRoute = createRoute({ getParentRoute: () => rootRoute, path: '/ser
     <Services />
   </React.Suspense>
 )})
+const myAgentRoute = createRoute({ getParentRoute: () => rootRoute, path: '/my-agent', component: () => (
+  <React.Suspense fallback={<div>Loading…</div>}>
+    <MyAgent />
+  </React.Suspense>
+)})
 const agentsRoute = createRoute({ getParentRoute: () => rootRoute, path: '/agents', component: () => (
   <React.Suspense fallback={<div>Loading…</div>}>
     <Agents />
@@ -130,7 +137,7 @@ const loginRoute = createRoute({ getParentRoute: () => rootRoute, path: '/login'
     <Login />
   </React.Suspense>
 )})
-const routeTree = rootRoute.addChildren([indexRoute, runsRoute, settingsRoute, servicesRoute, serviceWorkspaceRoute, agentsRoute, loginRoute])
+const routeTree = rootRoute.addChildren([indexRoute, runsRoute, myAgentRoute, settingsRoute, servicesRoute, serviceWorkspaceRoute, agentsRoute, loginRoute])
 
 const router = createRouter({ routeTree, defaultPreload: 'intent', basepath: '' })
 

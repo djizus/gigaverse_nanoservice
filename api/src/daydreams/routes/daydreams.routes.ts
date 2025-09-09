@@ -48,6 +48,95 @@ export const createDaydreamsRoutes = (deps: DaydreamsDeps) => {
     }
   });
 
+  // Ensure/return the current user's orchestrator agent ("My Agent")
+  app.get('/daydreams/user-agent', async (c) => {
+    try {
+      const userId = c.get('userId') as string | undefined;
+      const name = 'My Agent';
+      // Find existing owned by user with that name
+      const list = await deps.agentService.listAgents(userId);
+      let mine = list.find(a => a.userId === userId && (a.name || '').toLowerCase() === name.toLowerCase()) || null as any;
+      if (!mine) {
+        mine = await deps.agentService.createAgent({
+          name,
+          model: 'google-vertex/gemini-2.5-flash',
+          context: 'global',
+          description: 'User orchestrator that can collect information from other agents',
+          instructions: 'You are the user\'s personal orchestrator. When asked a question, decide which of the user\'s other agents might have the answer, query them succinctly, and synthesize a concise response.',
+          status: 'active',
+        }, { userId });
+      }
+      return c.json(mine);
+    } catch (err: any) {
+      console.error('[Daydreams] get user-agent error:', err);
+      return c.json({ error: err?.message || 'Failed to ensure user agent' }, 500);
+    }
+  });
+
+  // Orchestrated send: user agent fans out to other user agents and aggregates
+  app.post('/daydreams/user-agent/send', async (c) => {
+    try {
+      const userId = c.get('userId') as string | undefined;
+      const body = await c.req.json();
+      const { message, sessionId, targets } = body as { message?: string; sessionId?: string; targets?: string[] };
+      if (!message) return c.json({ error: 'message is required' }, 400);
+
+      // Ensure My Agent
+      const name = 'My Agent';
+      const list = await deps.agentService.listAgents(userId);
+      let myAgent = list.find(a => a.userId === userId && (a.name || '').toLowerCase() === name.toLowerCase()) || null;
+      if (!myAgent) {
+        myAgent = await deps.agentService.createAgent({
+          name,
+          model: 'google-vertex/gemini-2.5-flash',
+          context: 'global',
+          description: 'User orchestrator that can collect information from other agents',
+          instructions: 'You are the user\'s personal orchestrator. When asked a question, decide which of the user\'s other agents might have the answer, query them succinctly, and synthesize a concise response.',
+          status: 'active',
+        }, { userId });
+      }
+
+      // Ensure a session for My Agent
+      const session = await deps.agentService.ensureSession(myAgent.id, sessionId, userId);
+      // Persist the user message into My Agent's session
+      await deps.agentService.addUserMessage(myAgent.id, session.id, message);
+
+      // Determine target agents: default = all user agents except My Agent
+      const candidateAgents = list.filter(a => a.id !== myAgent!.id);
+      const targetIds = Array.isArray(targets) && targets.length
+        ? candidateAgents.filter(a => targets.includes(a.id)).map(a => a.id)
+        : candidateAgents.map(a => a.id);
+
+      // Fan-out message and gather last assistant replies
+      const results: { agentId: string; name: string; reply?: string }[] = [];
+      for (const aid of targetIds) {
+        try {
+          const agent = await deps.agentService.getAgent(aid, userId);
+          if (!agent) continue;
+          const sess = await deps.agentService.ensureSession(agent.id, undefined, userId);
+          const { reply } = await deps.agentService.sendMessage(agent, sess, message);
+          results.push({ agentId: agent.id, name: agent.name, reply: reply.content });
+        } catch (e: any) {
+          console.warn('[Daydreams][user-agent] target failed', aid, e?.message || e);
+          results.push({ agentId: aid, name: aid, reply: undefined });
+        }
+      }
+
+      // Aggregate a simple summary response
+      const summary = results.length
+        ? results.map(r => `- ${r.name}: ${r.reply ? r.reply : '(no reply)'}`).join('\n\n')
+        : 'No target agents available.';
+
+      // Store synthesized assistant message for My Agent
+      const assistant = await deps.agentService.addAssistantMessage(myAgent.id, session.id, summary);
+
+      return c.json({ sessionId: session.id, user: { content: message }, reply: { id: assistant.id, content: assistant.content } });
+    } catch (err: any) {
+      console.error('[Daydreams] user-agent send error:', err);
+      return c.json({ error: err?.message || 'Failed to send orchestrated message' }, 500);
+    }
+  });
+
   app.post('/daydreams/agents', async (c) => {
     try {
       if (process.env.LOG_LEVEL === 'debug') console.log('[Daydreams][HTTP] POST /daydreams/agents start');

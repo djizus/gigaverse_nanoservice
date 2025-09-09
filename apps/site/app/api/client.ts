@@ -39,10 +39,15 @@ export const Api = {
   // Agents
   listAgents(): Promise<AgentConfig[]> { return http('/daydreams/agents') },
   getAgent(id: string): Promise<AgentConfig> { return http(`/daydreams/agents/${id}`) },
+  getUserAgent(): Promise<AgentConfig> { return http('/daydreams/user-agent') },
   listSessions(agentId: string): Promise<Session[]> { return http(`/daydreams/agents/${agentId}/sessions`) },
   listMessages(sessionId: string): Promise<Message[]> { return http(`/daydreams/sessions/${sessionId}/messages`) },
   sendMessage(agentId: string, payload: { message: string; sessionId?: string }): Promise<{ sessionId: string; user: Message; reply: Message; }> {
     return http(`/daydreams/agents/${agentId}/send`, { method:'POST', body: JSON.stringify(payload) })
+  }
+  ,
+  sendUserAgentMessage(payload: { message: string; sessionId?: string; targets?: string[] }): Promise<{ sessionId: string; user: any; reply: any }> {
+    return http('/daydreams/user-agent/send', { method:'POST', body: JSON.stringify(payload) })
   }
   ,
   createAgent(input: { name: string; model: string; context: string; description?: string; instructions?: string }): Promise<AgentConfig> {

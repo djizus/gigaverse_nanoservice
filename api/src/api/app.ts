@@ -129,6 +129,9 @@ export async function createApp(deps: AppDeps) {
   app.use('/daydreams/agents/*', userAuth);
   app.use('/daydreams/sessions', userAuth);
   app.use('/daydreams/sessions/*', userAuth);
+  // Protect user-agent orchestrator endpoints
+  app.use('/daydreams/user-agent', userAuth);
+  app.use('/daydreams/user-agent/*', userAuth);
   // Protect UI runs and companion endpoints
   app.use('/ui/dungeon/*', userAuth);
   app.use('/ui/run/*', userAuth);
