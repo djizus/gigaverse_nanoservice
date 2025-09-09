@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import './styles/app.css'
 import { setAuthToken } from './api/client'
 import './styles/neon-theme.css'
+import { supabase } from './lib/supabase'
 
 const queryClient = new QueryClient()
 // hydrate auth token from localStorage (if any)
@@ -25,6 +26,27 @@ const RootComponent: React.FC = () => {
     }
   }, [neonTheme])
 
+  // Track auth status for header avatar
+  const [authEmail, setAuthEmail] = React.useState<string | null>(null)
+  React.useEffect(() => {
+    if (!supabase) return
+    let active = true
+    supabase.auth.getSession().then(({ data }) => {
+      if (!active) return
+      setAuthEmail(data?.session?.user?.email ?? null)
+      setAuthToken(data?.session?.access_token || undefined)
+    })
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+      setAuthEmail(session?.user?.email ?? null)
+      setAuthToken(session?.access_token || undefined)
+      try {
+        if (session?.access_token) localStorage.setItem('authToken', session.access_token)
+        else localStorage.removeItem('authToken')
+      } catch {}
+    })
+    return () => { active = false; sub?.subscription?.unsubscribe() }
+  }, [])
+
   return (
     <div className="app-shell">
       <div className="topbar">
@@ -41,7 +63,17 @@ const RootComponent: React.FC = () => {
         <Link to="/services" className="btn">Services</Link>
         <Link to="/agents" className="btn">Agents</Link>
         <Link to="/settings" className="btn">Settings</Link>
-        <Link to="/login" className="btn">Login</Link>
+        {authEmail ? (
+          <div title={authEmail} style={{
+            width: 28, height: 28, borderRadius: '50%', background: '#e5e7eb',
+            color: '#111827', display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontWeight: 600, marginLeft: 8
+          }}>
+            {authEmail.slice(0,1).toUpperCase()}
+          </div>
+        ) : (
+          <Link to="/login" className="btn">Login</Link>
+        )}
       </div>
       <div className="container">
         <Outlet />
@@ -98,7 +130,6 @@ const loginRoute = createRoute({ getParentRoute: () => rootRoute, path: '/login'
     <Login />
   </React.Suspense>
 )})
-
 const routeTree = rootRoute.addChildren([indexRoute, runsRoute, settingsRoute, servicesRoute, serviceWorkspaceRoute, agentsRoute, loginRoute])
 
 const router = createRouter({ routeTree, defaultPreload: 'intent', basepath: '' })
