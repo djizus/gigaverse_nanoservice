@@ -6,9 +6,10 @@ import { GigaverseTokenPanel } from './GigaverseTokenPanel';
 import { GlobalAgentProvider } from '../context/GlobalAgentProvider';
 import { AgentCommandBar } from '../components/AgentCommandBar';
 import { RunDetailChatPanel } from './run-detail-chat.panel';
+import { RunsListPage } from '../components/RunsListPage';
 
 export function App() {
-  type Page = 'dashboard' | 'services' | 'runs' | 'runs2' | 'agents' | 'settings' ;
+  type Page = 'dashboard' | 'services' | 'runs' | 'runs2' | 'runs-list' | 'agents' | 'settings' ;
   const [theme, setTheme] = useState<'light'|'dark'>(() => {
     const saved = localStorage.getItem('theme');
     if (saved === 'light' || saved === 'dark') return saved;
@@ -604,6 +605,7 @@ export function App() {
           <button className="btn" onClick={() => setPage('services')}>Services</button>
           <button className="btn" onClick={() => setPage('runs')}>Runs</button>
           <button className="btn" onClick={() => setPage('runs2')}>Run 2</button>
+          <button className="btn" onClick={() => setPage('runs-list')}>Runs List</button>
           <button className="btn" onClick={() => setPage('agents')}>Agents</button>
           <button className="btn" onClick={() => setPage('settings')}>Settings</button>
         </div>
@@ -617,17 +619,37 @@ export function App() {
       </div>
       <div className="container">
 
+        {page === 'runs-list' && (
+          <RunsListPage
+            agents={agents}
+            selectedAgent={selectedAgent}
+            setSelectedAgent={setSelectedAgent}
+            sessions={sessions}
+            selectedSession={selectedSession}
+            setSelectedSession={setSelectedSession}
+            messages={messages}
+            setMessages={setMessages}
+            setSessions={setSessions}
+            loading={loading}
+            setLoading={setLoading}
+            setError={setError}
+            setToast={setToast}
+            streaming={streaming}
+            setStreaming={setStreaming}
+          />
+        )}
+
         {page === 'runs2' && (
           <div className="content" style={{ padding: 0 }}>
             <div className="row" style={{ alignItems:'stretch', height: 'calc(100vh - 120px)' }}>
               {/* Sidebar */}
-              <div style={{ width: runs2Collapsed ? 0 : 280, transition: 'width 0.2s ease', borderRight: '1px solid var(--border)', overflow:'hidden' }}>
+              <div style={{ width: runs2Collapsed ? 0 : 320, transition: 'width 0.2s ease', borderRight: '1px solid var(--border)', overflow:'hidden' }}>
                 <div className="row" style={{ alignItems:'center', padding: 8, gap: 8, borderBottom: '1px solid var(--border)' }}>
                   <strong>Runs</strong>
                   <button className="btn" onClick={() => setRuns2Collapsed(true)} style={{ marginLeft:'auto' }}>{runs2Collapsed ? '»' : '«'}</button>
                 </div>
                 <div style={{ padding: 8 }}>
-                  <div className="row" style={{ gap: 6, marginBottom: 6 }}>
+                  <div className="row" style={{ gap: 6, marginBottom: 8, alignItems:'center' }}>
                     <button className="btn" onClick={async ()=>{
                       try {
                         setLoading(true);
@@ -639,22 +661,61 @@ export function App() {
                         setRunsMeta(meta); setRunServices(svcMap);
                       } finally { setLoading(false); }
                     }}>Refresh</button>
+                    <select style={{ flex:1 }} value={selectedRunId || ''} onChange={(e)=> setSelectedRunId(e.target.value||null)}>
+                      <option value="">-- select run --</option>
+                      {liveRuns.map(rid => (
+                        <option key={rid} value={rid}>{rid.slice(0,8)}…</option>
+                      ))}
+                    </select>
                   </div>
-                  <div style={{ maxHeight: 'calc(100vh - 180px)', overflow: 'auto' }}>
-                    {liveRuns.length === 0 && <div style={{ color:'#666' }}>No runs.</div>}
-                    {liveRuns.map((rid) => (
-                      <div key={rid} className="card" style={{ marginBottom: 8, cursor:'pointer', borderColor: selectedRunId===rid ? '#93c5fd' : undefined }} onClick={()=> setSelectedRunId(rid)}>
-                        <div style={{ fontWeight:600, fontSize: 13, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{rid}</div>
-                        <div style={{ display:'flex', gap:6, alignItems:'center', color:'#666', fontSize:12 }}>
-                          {runServices[rid] && (<span className="badge">{runServices[rid]}</span>)}
-                          {runsMeta[rid]?.status && (<span className="badge">{runsMeta[rid]?.status}</span>)}
-                        </div>
+                  <div style={{ maxHeight: 'calc(100vh - 210px)', overflow: 'auto' }}>
+                    {!selectedRunId && <div style={{ color:'#666' }}>Select a run to view events.</div>}
+                    {selectedRunId && (
+                      <div>
+                        {(liveEvents[selectedRunId] || []).map((e,i) => {
+                          const ts = new Date(e.timestamp || Date.now()).toLocaleTimeString();
+                          let summary = '';
+                          if (e.type === 'room_entered') {
+                            const stage = e.stage || e.state?.stage;
+                            const roomInStage = e.roomInStage || e.state?.roomInStage;
+                            summary = `Entered stage ${stage}-${roomInStage}`;
+                          } else if (e.type === 'combat_move') {
+                            summary = `Move: ${e.move}`;
+                          } else if (e.type === 'battle_result') {
+                            summary = `Result: ${e.result}`;
+                          } else if (e.type === 'loot_phase') {
+                            summary = `Loot phase (${Array.isArray(e.lootOptions)?e.lootOptions.length:0})`;
+                          } else if (e.type === 'loot_selected') {
+                            summary = `Loot: ${e.lootChoice || ''}`;
+                          } else if (e.type === 'run_completed') {
+                            summary = e.status === 'completed' ? `Run completed` : `Run ended: ${e.status}`;
+                          } else if (e.type === 'all_runs_completed') {
+                            summary = `All runs completed ${e.completedRuns}/${e.totalRuns}`;
+                          } else if (e.type === 'agent_decision_move') {
+                            summary = `Agent decided: move`;
+                          } else if (e.type === 'agent_decision_loot') {
+                            summary = `Agent decided: loot`;
+                          } else if (e.type === 'error' || e.type === 'agent_error') {
+                            summary = e.message || 'Error';
+                          } else {
+                            summary = e.type;
+                          }
+                          return (
+                            <div key={i} className="row" style={{ alignItems:'center', gap:8, padding:'6px 4px', borderBottom:'1px solid var(--border)' }}>
+                              <span className="badge" style={{ opacity:0.8 }}>{e.type}</span>
+                              <span style={{ fontSize:12, color:'#666' }}>{ts}</span>
+                              <div style={{ fontSize:12, color:'#333' }}>{summary}</div>
+                            </div>
+                          );
+                        })}
+                        {(liveEvents[selectedRunId] || []).length === 0 && (
+                          <div style={{ color:'#666' }}>No events yet for this run.</div>
+                        )}
                       </div>
-                    ))}
+                    )}
                   </div>
                 </div>
-              </div>
-              {/* Main */}
+              </div>{/* Main */}
               <div style={{ flex: 1, display:'flex', flexDirection:'column' }}>
                 <div className="row" style={{ alignItems:'center', padding: 8, gap: 8, borderBottom: '1px solid var(--border)' }}>
                   <button className="btn" onClick={() => setRuns2Collapsed(v=>!v)}>{runs2Collapsed ? 'Show List' : 'Hide List'}</button>
@@ -901,103 +962,6 @@ export function App() {
           </div>
           )}
 
-          {selectedRunId && (
-            <div className="card" style={{ marginTop: 12 }}>
-              <div className="row" style={{ alignItems: 'center' }}>
-                <div style={{ fontWeight: 600 }}>Run Detail</div>
-                <div style={{ color: '#666' }}>{selectedRunId}</div>
-                {runServices[selectedRunId] && (<span className="badge">{runServices[selectedRunId]}</span>)}
-                {runsMeta[selectedRunId]?.status && (<span className="badge">{runsMeta[selectedRunId]?.status}</span>)}
-                
-                <div style={{ marginLeft: 'auto' }} className="toolbar">
-                  {runServices[selectedRunId!] && (
-                    <button className="btn" onClick={() => {
-                      const svcId = runServices[selectedRunId!];
-                      const svc = (services || []).find((x:any) => x.serviceId === svcId) || null;
-                      if (svc) createCompanionAgentForService(svc);
-                    }}>Chat</button>
-                  )}
-                  <button className="btn" onClick={() => { navigator.clipboard?.writeText(selectedRunId || ''); }}>Copy ID</button>
-                  <button className="btn btn-danger" onClick={() => {
-                    setLiveEvents(prev => ({ ...prev, [selectedRunId!]: [] }));
-                  }}>Clear</button>
-                  <button className="btn" onClick={() => setSelectedRunId(null)}>Close</button>
-                </div>
-
-              </div>
-              <div className="messages" style={{ maxHeight: 380 }} ref={detailRef}>
-                {(liveEvents[selectedRunId] || []).map((e, i) => {
-                  const ts = new Date(e.timestamp || Date.now()).toLocaleTimeString();
-                  let summary = '';
-                  if (e.type === 'room_entered') {
-                    const stage = e.stage || e.state?.stage;
-                    const roomInStage = e.roomInStage || e.state?.roomInStage;
-                    summary = `Entered stage ${stage}-${roomInStage} (abs ${e.room || e.state?.currentRoom}) · enemy ${e.enemy}`;
-                  } else if (e.type === 'combat_move') {
-                    summary = `Move: ${e.move} · charges: ${e.playerCharges}`;
-                  } else if (e.type === 'battle_result') {
-                    summary = `Result: ${e.result} · HP ${e.playerHP}/${e.enemyHP}`;
-                  } else if (e.type === 'loot_phase') {
-                    summary = `Loot phase: ${Array.isArray(e.lootOptions) ? e.lootOptions.length : 0} options`;
-                  } else if (e.type === 'loot_selected') {
-                    if (e.gainedFrom === 'combat') {
-                      // Show item gains by rarity if available
-                      const rar = e.byRarityDelta ? Object.entries(e.byRarityDelta).map(([k,v]) => `${k}+${v}`).join(', ') : '';
-                      summary = `Combat loot: +${e.itemsGainedNow} item(s)` + (rar ? ` (${rar})` : '');
-                    } else {
-                      // Show stat bonuses
-                      const sd = e.statsDelta || {};
-                      const parts = Object.keys(sd).map(k => `${k} +${sd[k]}`).join(', ');
-                      summary = `Loot: ${e.lootChoice || ''}` + (parts ? ` · ${parts}` : '');
-                    }
-                  } else if (e.type === 'run_completed') {
-                    const tally = e.statsTally ? ` · stats: ${Object.entries(e.statsTally).map(([k,v])=>`${k}+${v}`).join(', ')}` : '';
-                    summary = e.status === 'completed' ? `Run completed · rooms ${e.roomsCleared}${tally}` : `Run ended: ${e.status}`;
-                  } else if (e.type === 'all_runs_completed') {
-                    summary = `All runs completed ${e.completedRuns}/${e.totalRuns} · successRate: ${Math.round((e.successRate||0))}%`;
-                  } else if (e.type === 'agent_decision_move') {
-                    summary = `Agent decided: move=${(e.message||'').split(': ')[1] || ''}`;
-                  } else if (e.type === 'agent_decision_loot') {
-                    summary = `Agent decided: loot=${(e.message||'').split(': ')[1] || ''}`;
-                  } else if (e.type === 'error' || e.type === 'agent_error') {
-                    summary = e.message || 'Error';
-                  }
-                    return (
-                      <div key={i} className={`msg assistant`}>
-                        <div className="meta">{e.type} · {ts}</div>
-                        <div className="bubble">
-                          {summary ? <div style={{ marginBottom: 6 }}>{summary}</div> : null}
-                          {e.xml ? (
-                            <details>
-                              <summary>Context (XML)</summary>
-                              <pre style={{ whiteSpace: 'pre-wrap' }}>{e.xml}</pre>
-                            </details>
-                          ) : null}
-                          <details>
-                            <summary>Raw</summary>
-                            <code style={{ whiteSpace: 'pre-wrap' }}>{JSON.stringify(e, null, 2)}</code>
-                          </details>
-                        </div>
-                      </div>
-                    );
-                })}
-                {(liveEvents[selectedRunId] || []).length === 0 && (
-                  <div style={{ color: '#666' }}>No events yet for this run.</div>
-                )}
-              </div>
-              <RunDetailChatPanel
-                selectedAgent={selectedAgent}
-                sessions={sessions}
-                selectedSession={selectedSession}
-                messages={messages}
-                streaming={streaming}
-                SessionSelector={SessionSelector}
-                onUseCompanion={() => { const svcId = runServices[selectedRunId!]; const svc = (services||[]).find((x:any)=> x.serviceId === svcId); if (svc) createCompanionAgentForService(svc); }}
-                onSend={handleSendMessage}
-                onToggleStreaming={setStreaming}
-              />
-            </div>
-        )}
       </div>
         )}
       </div>
