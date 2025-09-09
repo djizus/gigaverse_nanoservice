@@ -61,8 +61,9 @@ export class MemoryAdapter implements IDatabaseAdapter {
   }
 
 
-  async listRuns(opts: { status?: SummaryRun['status'][]; limit?: number; serviceId?: string; developer?: string } = {}): Promise<DatabaseResult<SummaryRun[]>> {
+  async listRuns(opts: { status?: SummaryRun['status'][]; limit?: number; serviceId?: string; developer?: string; userId?: string } = {}): Promise<DatabaseResult<SummaryRun[]>> {
     let list = Array.from(this.runs.values());
+    if (opts.userId) list = list.filter(r => (r.meta && (r.meta as any).userId) === opts.userId);
     if (opts.status && opts.status.length) list = list.filter(r => opts.status!.includes(r.status));
     list = list.sort((a,b) => (b.created_at.localeCompare(a.created_at)));
     if (opts.limit && opts.limit > 0) list = list.slice(0, opts.limit);

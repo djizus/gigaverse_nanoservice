@@ -16,7 +16,7 @@ export function createNamespacedServiceRoutes(registry: ServiceRegistry) {
       const op = body?.op;
       const data = body?.data ?? {};
       if (!op || typeof op !== 'string') return c.json({ error: 'Missing op' }, 400);
-      const res = await plugin.call(op, data, { requestId: c.get('requestId') });
+      const res = await plugin.call(op, data, { requestId: c.get('requestId'), userId: c.get('userId') });
       return c.json(res);
     } catch (err: any) {
       return c.json({ error: err?.message || 'Service call failed' }, 500);

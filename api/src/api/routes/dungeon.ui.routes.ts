@@ -30,7 +30,7 @@ export const createDungeonUiRoutes = (controller: DungeonController, db?: Databa
     try {
       const statusParam = c.req.query('status');
       const status = statusParam ? statusParam.split(',') as any : undefined;
-      const res = await db!.listRuns({ status, limit: 50 });
+      const res = await db!.listRuns({ status, limit: 50, userId: c.get('userId') });
       if (!res.success) return c.json({ error: res.error }, 500);
       return c.json(res.data);
     } catch (err: any) {
@@ -58,7 +58,14 @@ export const createDungeonUiRoutes = (controller: DungeonController, db?: Databa
       const res = await db!.getDungeonRun(id);
       if (!res.success) return c.json({ error: res.error }, 404);
       const meta = (res.data?.meta || {}) as any;
-      return c.json({ agentId: meta.agentId || null, sessionId: meta.sessionId || null });
+      let agentId: string | null = meta.agentId || null;
+      let sessionId: string | null = meta.sessionId || null;
+      const userId = c.get('userId') as string | undefined;
+      if (agentId && agents && userId) {
+        const owned = await agents.getAgent(agentId, userId);
+        if (!owned) { agentId = null; sessionId = null; }
+      }
+      return c.json({ agentId, sessionId });
     } catch (err: any) {
       return c.json({ error: err?.message || 'Failed to get companion' }, 500);
     }

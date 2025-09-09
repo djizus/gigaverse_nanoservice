@@ -12,6 +12,7 @@ export interface ServiceManifest {
 
 export interface ServiceContext {
   requestId?: string;
+  userId?: string;
 }
 
 export interface ServicePlugin {

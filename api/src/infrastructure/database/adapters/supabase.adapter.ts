@@ -79,7 +79,7 @@ export class SupabaseAdapter implements IDatabaseAdapter {
     }
   }
 
-  async listRuns(opts: { status?: SummaryRun['status'][]; limit?: number; serviceId?: string; developer?: string } = {}): Promise<DatabaseResult<SummaryRun[]>> {
+  async listRuns(opts: { status?: SummaryRun['status'][]; limit?: number; serviceId?: string; developer?: string; userId?: string } = {}): Promise<DatabaseResult<SummaryRun[]>> {
     try {
       let query = this.supabase
         .from('run_summaries_simple')
@@ -88,6 +88,7 @@ export class SupabaseAdapter implements IDatabaseAdapter {
       if (opts.status && opts.status.length) query = query.in('status', opts.status);
       if (opts.serviceId) query = query.eq('service_id', opts.serviceId);
       if (opts.developer) query = query.eq('developer', opts.developer);
+      if (opts.userId) query = (query as any).filter('meta->>userId','eq', opts.userId);
       query = query.limit(opts.limit && opts.limit > 0 ? opts.limit : 50);
       const { data, error } = await query;
       if (error) return { success: false, error: error.message };

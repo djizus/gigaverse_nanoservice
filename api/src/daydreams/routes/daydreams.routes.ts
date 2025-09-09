@@ -39,7 +39,7 @@ export const createDaydreamsRoutes = (deps: DaydreamsDeps) => {
   app.get('/daydreams/agents', async (c) => {
     try {
       const userId = c.get('userId') as string | undefined;
-      if (process.env.LOG_LEVEL === 'debug') console.log('[Daydreams][HTTP] GET /daydreams/agents userId=', userId);
+      console.log('[Daydreams][HTTP][debug] GET /daydreams/agents userId=', userId);
       const agents = await deps.agentService.listAgents(userId);
       return c.json(agents);
     } catch (err: any) {
@@ -131,6 +131,7 @@ export const createDaydreamsRoutes = (deps: DaydreamsDeps) => {
     try {
       const id = c.req.param('id');
       const userId = c.get('userId') as string | undefined;
+      console.log(`[Daydreams][HTTP][debug] GET /daydreams/agents/:id id=`, id, ' userId=', userId);
       const agent = await deps.agentService.getAgent(id, userId);
       if (!agent) return c.json({ error: 'Agent not found' }, 404);
       return c.json(agent);

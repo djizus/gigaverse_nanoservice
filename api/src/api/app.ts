@@ -129,6 +129,11 @@ export async function createApp(deps: AppDeps) {
   app.use('/daydreams/agents/*', userAuth);
   app.use('/daydreams/sessions', userAuth);
   app.use('/daydreams/sessions/*', userAuth);
+  // Protect UI runs and companion endpoints
+  app.use('/ui/dungeon/*', userAuth);
+  app.use('/ui/run/*', userAuth);
+  // Protect namespaced services calls
+  app.use('/ns/*', userAuth);
   app.route('/', createDaydreamsRoutes({ 
     agentService, 
     contextRegistry, 

@@ -55,23 +55,20 @@ export class SupabaseStorage implements DaydreamsStorage {
   }
 
   async getAgent(id: string, opts?: { userId?: string }): Promise<AgentConfig | null> {
-    let query = this.supabase
+    // Fetch raw row first to improve debug transparency
+    const { data, error } = await this.supabase
       .from('agents')
       .select('*')
       .eq('id', id)
       .maybeSingle();
-    if (opts?.userId) {
-      query = this.supabase
-        .from('agents')
-        .select('*')
-        .eq('id', id)
-        .eq('user_id', opts.userId)
-        .maybeSingle();
-    }
-    const { data, error } = await query;
     if (error) throw error;
-    console.log(`[Daydreams][Storage] getAgent id=${data?.id ?? null}`);
-    return data ? mapAgentFromRow(data) : null;
+    console.log(`[Daydreams][Storage] getAgent raw id=${data?.id ?? null} rowUser=${data?.user_id ?? null} queryUser=${opts?.userId ?? null}`);
+    if (!data) return null;
+    if (opts?.userId && data.user_id && data.user_id !== opts.userId) {
+      // Not owned by this user — behave as not found
+      return null;
+    }
+    return mapAgentFromRow(data);
   }
 
   async updateAgent(id: string, input: UpdateAgentInput, opts?: { userId?: string }): Promise<AgentConfig | null> {

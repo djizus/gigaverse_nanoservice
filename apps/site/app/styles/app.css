@@ -1,0 +1,59 @@
+:root {
+  --bg: #0b0f14;
+  --surface: #0f141b;
+  --border: #1f2937;
+  --text: #e5e7eb;
+  --muted: #9ca3af;
+  --primary: #60a5fa;
+}
+* { box-sizing: border-box; }
+body, html, #root { height: 100%; margin: 0; background: var(--bg); color: var(--text); font-family: ui-sans-serif, system-ui, sans-serif; }
+.app-shell { display: flex; flex-direction: column; height: 100%; }
+.topbar { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--border); background: var(--surface); }
+.topbar .spacer { margin-left: auto; }
+.btn { 
+  background: var(--primary); 
+  color: #000; 
+  text-decoration: none; 
+  border: 1px solid var(--primary); 
+  padding: 6px 12px; 
+  border-radius: 6px; 
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.btn:hover { 
+  background: #3b82f6; 
+  border-color: #3b82f6;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
+}
+.btn:active {
+  transform: translateY(0);
+}
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* Secondary button variant */
+.btn-secondary {
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+.btn-secondary:hover {
+  background: var(--surface);
+  border-color: var(--primary);
+}
+.container { flex: 1; padding: 12px; }
+.card { border: 1px solid var(--border); border-radius: 8px; padding: 8px; background: #0d131a; }
+.badge { border: 1px solid var(--border); padding: 2px 6px; border-radius: 999px; font-size: 11px; }
+.row { display: flex; gap: 8px; }
+input, select, textarea { background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; }
+.sidebar-title { font-weight: 700; padding: 8px; border-bottom: 1px solid var(--border); }
+.messages { border: 1px solid var(--border); border-radius: 8px; padding: 8px; background: #0a0f15; overflow: auto; }
+.msg { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; }
+.msg .meta { color: var(--muted); font-size: 12px; }
+.msg .bubble { background: #0e1620; border: 1px solid var(--border); border-radius: 8px; padding: 8px; }
