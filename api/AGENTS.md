@@ -2,9 +2,10 @@
 
 ## Project Structure & Module Organization
 - `src/api`: Hono server bootstrap and HTTP routes (e.g., `server.ts`, `routes/*`).
-- `src/domains`: Feature logic by domain (e.g., `dungeon.*`, `gigaverse.*`, `payment.*`).
-- `src/infrastructure`: External services (e.g., `config/env.config.ts`, `database/*`).
-- `src/shared`: Cross-cutting types, utils, middleware.
+- `src/services`: Thin plugins implementing `ServicePlugin` (manifest + op routing only).
+- `src/domains`: Per-service domain (ops, validators, container, manifest, ui-schema). Keep engines here.
+- `src/infrastructure`: External/shared adapters (config, database, events, ai, http).
+- `src/shared`: Cross-cutting types, middleware, utils, and shared `ports/*`.
 - `database/schema.sql`: Supabase/Postgres schema for runs, logs, events.
 - Entrypoints: `server.ts` (service), `test-dungeon.ts` (local client/examples).
 
@@ -41,9 +42,23 @@ Set env via `.env` (see `.env.example`, `env.production.example`). Default port 
   - `GET /ns/:developer?/:service/stream?runId=...`
   - `GET /services`, `GET /services/:developer/:service/manifest`
 
-### Plugins
-- Gigaverse: `src/services/gigaverse/gigaverse.plugin.ts` → wraps `DungeonService`
-- Loot Survivor: `src/services/loot-survivor/*` → LS‑ENGINE context + read‑only runner
+### Plugins (thin)
+- Gigaverse Dungeon: `src/services/gigaverse/gigaverse.plugin.ts` → delegates to `domains/gigaverse-dungeon`
+- Gigaverse Fishing: `src/services/gigaverse-fishing/gigaverse-fishing.plugin.ts` → delegates to `domains/gigaverse-fishing`
+- Loot Survivor: `src/services/loot-survivor/*` (to be aligned next)
+- Vega Trading: `src/services/vega-trading/vega-trading.plugin.ts` → delegates to `domains/vega-trading`
+
+### Domain layout (per service)
+- `src/domains/<service-id>/manifest.ts` — `ServiceManifest`
+- `src/domains/<service-id>/ui-schema.ts` — launch form
+- `src/domains/<service-id>/validators/*` — zod validation per op
+- `src/domains/<service-id>/application/ops/*` — op handlers (pure, small)
+- `src/domains/<service-id>/container.ts` — wires ports to shared adapters; ensures dedicated agent
+- `src/domains/<service-id>/index.ts` — re-exports for plugin
+
+### Shared ports/adapters
+- Ports: `src/shared/ports/{run-repository,event-bus,orchestrator}.port.ts`
+- Adapters: `src/infrastructure/{database/adapters/run-repository.adapter.ts,events/event-bus.adapter.ts,ai/orchestrator.adapter.ts}`
 
 ### DB Adapters
 - Interface: `src/infrastructure/database/adapter.interface.ts`

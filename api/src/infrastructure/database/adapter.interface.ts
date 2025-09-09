@@ -10,6 +10,9 @@ export type EventType =
   | 'agent_decision_move'
   | 'agent_decision_loot'
   | 'agent_decision_fishing'
+  | 'ls_agent_analysis'
+  | 'trading_signal'
+  | 'context'
   // Fishing events
   | 'fishing_started'
   | 'fishing_cards'
