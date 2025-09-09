@@ -114,6 +114,26 @@ export class GigaverseHttpClient {
     }
     return String(error);
   }
+
+  protected async getRequest<T = any>(endpoint: string): Promise<T> {
+    const url = `${this.config.apiBaseUrl}${endpoint}`;
+    try {
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${this.authToken}`,
+          'Accept': '*/*',
+        },
+        mode: 'cors',
+        credentials: 'include'
+      });
+      const result = await response.json();
+      return result as T;
+    } catch (error) {
+      console.error(`[GigaverseClient] GET ${endpoint} error:`, error);
+      throw error;
+    }
+  }
 }
 
 export class GigaverseGameClient extends GigaverseHttpClient {
@@ -291,4 +311,16 @@ export class GigaverseGameClient extends GigaverseHttpClient {
     return this.makeRequest('/game/dungeon/action', payload);
   }
 
+  // ===== FISHING API =====
+  async getFishingCards(address: string): Promise<any> {
+    return this.getRequest(`/fishing/cards/player/${address}`);
+  }
+
+  async getFishingState(address: string): Promise<any> {
+    return this.getRequest(`/fishing/state/${address}`);
+  }
+
+  async startFishingAction(payload: { action: 'start_run'|'play_cards'; actionToken: any; data: { cards: number[]; nodeId?: string } }): Promise<GigaverseApiResponse> {
+    return this.makeRequest('/fishing/action', payload);
+  }
 }

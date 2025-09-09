@@ -9,6 +9,11 @@ export type EventType =
   | 'loot_selected'
   | 'agent_decision_move'
   | 'agent_decision_loot'
+  | 'agent_decision_fishing'
+  // Fishing events
+  | 'fishing_started'
+  | 'fishing_cards'
+  | 'fishing_capture_progress'
   | 'run_completed'
   | 'all_runs_completed'
   | 'error';
@@ -38,4 +43,3 @@ export interface IDatabaseAdapter {
   // Aggregates
   getRunComplete(dungeonRunId: string): Promise<DatabaseResult<{ summary: SummaryRun; details: SummaryDetail[] }>>;
 }
-

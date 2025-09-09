@@ -12,6 +12,9 @@ import {
   computeStageRoom
 } from '../gigaverse/gigaverse.utils';
 import { DatabaseService } from '../../infrastructure/database/database.service';
+import { RunLogger } from '../../shared/logging/run-logger';
+import { RunFinalizer } from '../../shared/logging/run-finalizer';
+import { DungeonStateAdapter } from '../gigaverse/adapters/dungeon.adapter';
 import { logError, logSuccess, throwError, formatError as formatErrorMessage } from '../../shared/utils/error.utils';
 import { CreateDungeonRunInput } from '../../infrastructure/database/types';
 import { DaydreamsAgentService, RoomDecisionHistoryItem } from '../../infrastructure/ai/daydreams.agent';
@@ -21,6 +24,7 @@ const ACTION_DELAY_MS = 100; // Small delay to avoid hammering APIs
 
 export class DungeonService {
   private agent: DaydreamsAgentService | null;
+  private adapter = new DungeonStateAdapter();
 
   constructor(private databaseService: DatabaseService, agent?: DaydreamsAgentService | null) {
     // Now depends on database service for real-time logging
@@ -35,7 +39,7 @@ export class DungeonService {
    * Start dungeon runs and return immediately with runId
    * Processing happens in the background with real-time event logging
    */
-  async startDungeonRuns(request: DungeonRequest): Promise<DungeonRunResponse> {
+  async startDungeonRuns(request: DungeonRequest, opts?: { serviceId?: string; developer?: string; meta?: Record<string, any> }): Promise<DungeonRunResponse> {
     try {
       // Check for existing active runs first
       const activeRunResult = await this.databaseService.getActiveRunForPlayer(
@@ -61,7 +65,7 @@ export class DungeonService {
       // No active run found, create a new one
       const dungeonRunInput: CreateDungeonRunInput = {
         player_address: request.playerAddress,
-        context: request.context,
+        context: request.user_instructions,
         llm_model: request.llmModel || undefined,
         meta: { source: 'api', version: 'v1' },
         total_runs: request.totalRuns,
@@ -71,7 +75,7 @@ export class DungeonService {
         gear_instance_ids: request.gearInstanceIds || []
       };
       
-      const createResult = await this.databaseService.createDungeonRun(dungeonRunInput);
+      const createResult = await this.databaseService.createDungeonRun(dungeonRunInput, opts);
       
       if (!createResult.success || !createResult.data) {
         throwError(
@@ -114,7 +118,7 @@ export class DungeonService {
    */
   private async processDungeonRunsInBackground(dungeonRunId: string, request: DungeonRequest): Promise<void> {
     const { 
-      context,
+      user_instructions,
       playerAddress, 
       gigaverseToken,
       totalRuns,
@@ -156,19 +160,16 @@ export class DungeonService {
         const runLog = runLogResult.data;
         
         // Log run started event
-        await this.databaseService.logEvent(
-          dungeonRunId,
-          runLog.id,
-          'run_started',
-          `Starting dungeon run ${runNumber}/${totalRuns}`,
-          { runNumber, dungeonId, isJuiced }
-        );
+        {
+          const logger = new RunLogger(this.databaseService, dungeonRunId, runLog.id);
+          await logger.emit('run_started', `Starting dungeon run ${runNumber}/${totalRuns}`, { runNumber, dungeonId, isJuiced });
+        }
 
         const success = await this.executeSingleDungeonRun(
           dungeonRunId,
           runLog,
           gameClient,
-          context,
+          user_instructions,
           {
             runNumber,
             dungeonId,
@@ -201,18 +202,13 @@ export class DungeonService {
       }
 
       if (!aborted) {
-        // Mark as completed
-        await this.databaseService.completeDungeonRun(dungeonRunId, completedRuns);
-
-        // Log completion event (session-level, no specific run log)
-        await this.databaseService.createRunEvent({
-          dungeon_run_id: dungeonRunId,
-          run_log_id: null, // null for session-level events
-          event_type: 'all_runs_completed',
-          message: `All dungeon runs completed! ${completedRuns}/${totalRuns} successful`,
-          event_data: { completedRuns, totalRuns, successfulRuns, successRate: (successfulRuns / totalRuns) * 100 }
-        });
-
+        const sessionLogger = new RunLogger(this.databaseService, dungeonRunId, null);
+        const finalizer = new RunFinalizer(this.databaseService, sessionLogger);
+        await finalizer.completeSession(
+          dungeonRunId,
+          { completedRuns, totalRuns, successfulRuns, successRate: (successfulRuns / totalRuns) * 100 },
+          { emitRunCompleted: false }
+        );
         console.log(`✅ Completed all runs for ${dungeonRunId}: ${completedRuns}/${totalRuns} successful`);
       } else {
         console.log(`❌ Dungeon run ${dungeonRunId} aborted after failure; not marking as completed.`);
@@ -231,7 +227,7 @@ export class DungeonService {
     dungeonRunId: string,
     runLog: any,
     gameClient: GigaverseGameClient,
-    context: string,
+    user_instructions: string,
     params: {
       runNumber: number;
       dungeonId: number;
@@ -301,9 +297,7 @@ export class DungeonService {
           });
           // Loot phase - enriched logging with stage/room
           const srLoot = computeStageRoom(dungeonState.currentRoom);
-          await this.databaseService.logEvent(
-            dungeonRunId,
-            runLog.id,
+          await logger.emit(
             'loot_phase',
             `Loot phase (stage ${srLoot.stage}-${srLoot.room}): ${dungeonState.lootOptions.length} options available`,
             { lootOptions: dungeonState.lootOptions, state: statePreview, stage: srLoot.stage, roomInStage: srLoot.room, absRoom: dungeonState.currentRoom }
@@ -312,83 +306,56 @@ export class DungeonService {
           // Agent-only decision for loot
           if (!this.agent || !this.agent.isEnabled) {
             const msg = 'Daydreams agent disabled or not configured';
-            await this.databaseService.logEvent(
-              dungeonRunId,
-              runLog.id,
-              'agent_error',
-              msg,
-              { reason: 'disabled_or_missing_key' }
-            );
-            await this.databaseService.updateRunLog(runLog.id, { status: 'error', error_message: msg });
+            await logger.emit('agent_error', msg, { reason: 'disabled_or_missing_key' });
+            const finz = new RunFinalizer(this.databaseService, logger);
+            await finz.errorRunLog(runLog.id, msg);
             await this.databaseService.failDungeonRun(dungeonRunId, msg);
             return false;
           }
 
           let lootChoice: any;
           try {
-            const { buildLootSystem, buildStrategyContext, sanitizeLootOptionsForLLM, sanitizeStateForLLM } = await import('../gigaverse/gigaverse.prompts');
-            const system = buildLootSystem();
-            const locLoot = computeStageRoom(dungeonState.currentRoom);
-            const strategy = buildStrategyContext(context, { stage: locLoot.stage, room: locLoot.room, absRoom: dungeonState.currentRoom });
-            const compactState = sanitizeStateForLLM({
-              currentDungeon: dungeonState.currentDungeon,
+            
+            const { decideWithRetries } = await import('../../shared/agent/decide-with-retries');
+            const system = this.adapter.buildSystem('loot', user_instructions);
+            const buildPrompt = () => this.adapter.composePrompt('loot', {
+              state: {
+                currentDungeon: dungeonState.currentDungeon,
+                currentRoom: dungeonState.currentRoom,
+                currentEnemy: dungeonState.currentEnemy,
+                lootPhase: dungeonState.lootPhase,
+                lastBattleResult: dungeonState.lastBattleResult,
+                player: dungeonState.player,
+                enemy: dungeonState.enemy,
+              },
+              user_instructions,
+              roomDecisionHistory,
               currentRoom: dungeonState.currentRoom,
-              currentEnemy: dungeonState.currentEnemy,
-              lootPhase: dungeonState.lootPhase,
-              lastBattleResult: dungeonState.lastBattleResult,
-              player: dungeonState.player,
-              enemy: dungeonState.enemy,
+              lootOptions: dungeonState.lootOptions,
             });
-            const optionsSafe = sanitizeLootOptionsForLLM(dungeonState.lootOptions);
-            const compositeLoot = [
-              'Context:', strategy,
-              'State:', JSON.stringify(compactState),
-              'LootOptions:', JSON.stringify(optionsSafe),
-              'RoomDecisionHistory:', JSON.stringify(roomDecisionHistory || []),
-              (await import('../gigaverse/gigaverse.prompts')).buildLootInstruction(),
-            ].join('\n');
             const modelIdLoot = llmModel || (await import('../../infrastructure/config/ai.config')).aiConfig.model;
-            let parsedLoot: any = null;
-            let textLoot = '';
-            const MAX_ATTEMPTS_LOOT = 3;
-            for (let attempt = 1; attempt <= MAX_ATTEMPTS_LOOT; attempt++) {
-              try {
-                textLoot = await this.agent.decideText(modelIdLoot, system, compositeLoot);
-                parsedLoot = (await import('../gigaverse/gigaverse.prompts')).parseLootFromText(textLoot || '');
-                await this.databaseService.logEvent(
-                  dungeonRunId,
-                  runLog.id,
-                  'agent_decision_loot',
-                  `Agent loot decision (attempt ${attempt}/${MAX_ATTEMPTS_LOOT}): ${parsedLoot.loot || 'invalid'}`,
-                  { reason: parsedLoot.reason, raw: (textLoot || '').slice(0, 300) }
-                );
-                if (parsedLoot.loot) break;
-              } catch (e) {
-                await this.databaseService.logEvent(
-                  dungeonRunId,
-                  runLog.id,
-                  'agent_error',
-                  `Agent loot parsing error (attempt ${attempt}/${MAX_ATTEMPTS_LOOT})`,
-                  { phase: 'loot', error: String(e) }
-                );
-              }
-              if (attempt < MAX_ATTEMPTS_LOOT) await sleep(200);
-            }
 
-            if (!parsedLoot?.loot) throw new Error('Failed to parse loot from agent response');
-            lootChoice = parsedLoot.loot;
+            const res = await decideWithRetries({
+              agent: this.agent!,
+              modelId: modelIdLoot,
+              system,
+              buildPrompt,
+              parse: (t: string) => this.adapter.parse('loot', t || ''),
+              success: (p: any) => this.adapter.success('loot', p),
+              logAttempt: async (attempt, max, parsed, raw) => logger.decisionAttempt('loot', attempt, max, parsed?.loot || 'invalid', { reason: parsed?.reason, raw: (raw || '').slice(0, 300) }),
+              logError: async (attempt, max, err) => logger.decisionError('loot', attempt, max, err, { phase: 'loot' }),
+              maxAttempts: 3,
+            });
+
+            if (!res?.parsed?.loot) throw new Error('Failed to parse loot from agent response');
+            lootChoice = res.parsed.loot;
             lootChoices.push(lootChoice);
-            roomDecisionHistory.push({ kind: 'loot', choice: lootChoice, reason: parsedLoot.reason || '' });
+            roomDecisionHistory.push({ kind: 'loot', choice: lootChoice, reason: res.parsed.reason || '' });
           } catch (err) {
             const message = `Agent loot decision failed: ${formatErrorMessage(err)}`;
-            await this.databaseService.logEvent(
-              dungeonRunId,
-              runLog.id,
-              'agent_error',
-              message,
-              { phase: 'loot', error: formatErrorMessage(err), model: llmModel || 'default', room: dungeonState.currentRoom }
-            );
-            await this.databaseService.updateRunLog(runLog.id, { status: 'error', error_message: message });
+            await logger.emit('agent_error', message, { phase: 'loot', error: formatErrorMessage(err), model: llmModel || 'default', room: dungeonState.currentRoom });
+            const finz = new RunFinalizer(this.databaseService, logger);
+            await finz.errorRunLog(runLog.id, message);
             await this.databaseService.abortDungeonRun(dungeonRunId, message);
             return false;
           }
@@ -442,13 +409,7 @@ export class DungeonService {
             addDelta('scissor.def', before?.scissor?.currentDEF, after?.scissor?.currentDEF);
           } catch {}
           
-          await this.databaseService.logEvent(
-            dungeonRunId,
-            runLog.id,
-            'loot_selected',
-            `Selected ${lootChoice}, gained ${itemsGainedThisLoot} items`,
-            { lootChoice, itemsGained: itemsGainedThisLoot, statsDelta: delta, statsTally }
-          );
+          await logger.emit('loot_selected', `Selected ${lootChoice}, gained ${itemsGainedThisLoot} items`, { lootChoice, itemsGained: itemsGainedThisLoot, statsDelta: delta, statsTally });
 
         } else {
           // Combat phase - use heuristics for next move
@@ -463,11 +424,7 @@ export class DungeonService {
             enemy: dungeonState.enemy,
           });
           const srEnter = computeStageRoom(dungeonState.currentRoom);
-          await this.databaseService.logEvent(
-            dungeonRunId,
-            runLog.id,
-            'room_entered',
-            `Entered stage ${srEnter.stage}-${srEnter.room} (abs ${dungeonState.currentRoom}), enemy ${dungeonState.currentEnemy}`,
+          await logger.emit('room_entered', `Entered stage ${srEnter.stage}-${srEnter.room} (abs ${dungeonState.currentRoom}), enemy ${dungeonState.currentEnemy}`,
             { 
               room: dungeonState.currentRoom, 
               enemy: dungeonState.currentEnemy,
@@ -482,81 +439,55 @@ export class DungeonService {
           // Agent-only decision for move
           if (!this.agent || !this.agent.isEnabled) {
             const msg = 'Daydreams agent disabled or not configured';
-            await this.databaseService.logEvent(
-              dungeonRunId,
-              runLog.id,
-              'agent_error',
-              msg,
-              { reason: 'disabled_or_missing_key' }
-            );
-            await this.databaseService.updateRunLog(runLog.id, { status: 'error', error_message: msg });
+            await logger.emit('agent_error', msg, { reason: 'disabled_or_missing_key' });
+            const finz = new RunFinalizer(this.databaseService, logger);
+            await finz.errorRunLog(runLog.id, msg);
             await this.databaseService.failDungeonRun(dungeonRunId, msg);
             return false;
           }
 
           let move: any;
           try {
-            const { buildMoveSystem, buildStrategyContext, sanitizeStateForLLM, buildMoveInstruction, parseMoveFromText } = await import('../gigaverse/gigaverse.prompts');
-            const system = buildMoveSystem();
-            const locMove = computeStageRoom(dungeonState.currentRoom);
-            const strategy = buildStrategyContext(context, { stage: locMove.stage, room: locMove.room, absRoom: dungeonState.currentRoom });
-            const compactState = sanitizeStateForLLM({
-              currentDungeon: dungeonState.currentDungeon,
+            
+            const { decideWithRetries } = await import('../../shared/agent/decide-with-retries');
+            const system = this.adapter.buildSystem('move', user_instructions);
+            const buildPrompt = () => this.adapter.composePrompt('move', {
+              state: {
+                currentDungeon: dungeonState.currentDungeon,
+                currentRoom: dungeonState.currentRoom,
+                currentEnemy: dungeonState.currentEnemy,
+                lootPhase: dungeonState.lootPhase,
+                lastBattleResult: dungeonState.lastBattleResult,
+                player: dungeonState.player,
+                enemy: dungeonState.enemy,
+              },
+              user_instructions,
+              roomDecisionHistory,
               currentRoom: dungeonState.currentRoom,
-              currentEnemy: dungeonState.currentEnemy,
-              lootPhase: dungeonState.lootPhase,
-              lastBattleResult: dungeonState.lastBattleResult,
-              player: dungeonState.player,
-              enemy: dungeonState.enemy,
             });
-            const compositeMove = [
-              'Context:', strategy,
-              'State:', JSON.stringify(compactState),
-              'RoomDecisionHistory:', JSON.stringify(roomDecisionHistory || []),
-              buildMoveInstruction(),
-            ].join('\n');
             const modelIdMove = llmModel || (await import('../../infrastructure/config/ai.config')).aiConfig.model;
-            let parsedMove: any = null;
-            let textMove = '';
-            const MAX_ATTEMPTS_MOVE = 3;
-            for (let attempt = 1; attempt <= MAX_ATTEMPTS_MOVE; attempt++) {
-              try {
-                textMove = await this.agent.decideText(modelIdMove, system, compositeMove);
-                parsedMove = parseMoveFromText(textMove || '');
-                await this.databaseService.logEvent(
-                  dungeonRunId,
-                  runLog.id,
-                  'agent_decision_move',
-                  `Agent move decision (attempt ${attempt}/${MAX_ATTEMPTS_MOVE}): ${parsedMove.move || 'invalid'}`,
-                  { reason: parsedMove.reason, raw: (textMove || '').slice(0, 300) }
-                );
-                if (parsedMove.move) break;
-              } catch (e) {
-                await this.databaseService.logEvent(
-                  dungeonRunId,
-                  runLog.id,
-                  'agent_error',
-                  `Agent move parsing error (attempt ${attempt}/${MAX_ATTEMPTS_MOVE})`,
-                  { phase: 'combat', error: String(e) }
-                );
-              }
-              if (attempt < MAX_ATTEMPTS_MOVE) await sleep(200);
-            }
 
-            if (!parsedMove?.move) throw new Error('Failed to parse move from agent response');
-            move = parsedMove.move;
+            const res = await decideWithRetries({
+              agent: this.agent!,
+              modelId: modelIdMove,
+              system,
+              buildPrompt,
+              parse: (t: string) => this.adapter.parse('move', t || ''),
+              success: (p: any) => this.adapter.success('move', p),
+              logAttempt: async (attempt, max, parsed, raw) => logger.decisionAttempt('move', attempt, max, parsed?.move || 'invalid', { reason: parsed?.reason, raw: (raw || '').slice(0, 300) }),
+              logError: async (attempt, max, err) => logger.decisionError('move', attempt, max, err, { phase: 'combat' }),
+              maxAttempts: 3,
+            });
+
+            if (!res?.parsed?.move) throw new Error('Failed to parse move from agent response');
+            move = res.parsed.move;
             moves.push(move);
-            roomDecisionHistory.push({ kind: 'move', choice: move, reason: parsedMove.reason || '' });
+            roomDecisionHistory.push({ kind: 'move', choice: move, reason: res.parsed.reason || '' });
           } catch (err) {
             const message = `Agent move decision failed: ${formatErrorMessage(err)}`;
-            await this.databaseService.logEvent(
-              dungeonRunId,
-              runLog.id,
-              'agent_error',
-              message,
-              { phase: 'combat', error: formatErrorMessage(err), model: llmModel || 'default', room: dungeonState.currentRoom }
-            );
-            await this.databaseService.updateRunLog(runLog.id, { status: 'error', error_message: message });
+            await logger.emit('agent_error', message, { phase: 'combat', error: formatErrorMessage(err), model: llmModel || 'default', room: dungeonState.currentRoom });
+            const finz = new RunFinalizer(this.databaseService, logger);
+            await finz.errorRunLog(runLog.id, message);
             await this.databaseService.abortDungeonRun(dungeonRunId, message);
             return false;
           }
@@ -569,13 +500,7 @@ export class DungeonService {
             gearInstanceIds
           };
           
-          await this.databaseService.logEvent(
-            dungeonRunId,
-            runLog.id,
-            'combat_move',
-            `Making move: ${move}`,
-            { move, playerCharges: dungeonState.player[move].currentCharges }
-          );
+          await logger.emit('combat_move', `Making move: ${move}`, { move, playerCharges: dungeonState.player[move].currentCharges });
           
           await sleep(ACTION_DELAY_MS);
           const prevEnemyHP = dungeonState.enemy?.health?.current ?? 0;
@@ -606,9 +531,7 @@ export class DungeonService {
             }
             if (gained > 0) {
               itemsGained += gained;
-              await this.databaseService.logEvent(
-                dungeonRunId,
-                runLog.id,
+              await logger.emit(
                 'loot_selected',
                 `Gained ${gained} item(s) from combat`,
                 { gainedFrom: 'combat', itemsGainedNow: gained, totalItemsGained: itemsGained, byRarityDelta, byIdDelta }
@@ -623,17 +546,11 @@ export class DungeonService {
           
           const battleResult = dungeonState.lastBattleResult;
 
-          await this.databaseService.logEvent(
-            dungeonRunId,
-            runLog.id,
-            'battle_result',
-            `Battle result: ${battleResult || 'ongoing'}`,
-            { 
-              result: battleResult,
-              playerHP: dungeonState.player.health.current,
-              enemyHP: dungeonState.enemy.health.current
-            }
-          );
+          await logger.emit('battle_result', `Battle result: ${battleResult || 'ongoing'}`, { 
+            result: battleResult,
+            playerHP: dungeonState.player.health.current,
+            enemyHP: dungeonState.enemy.health.current
+          });
 
           // Track battle win/loss for the move itself (RPS), independent of room clear
           if (battleResult === 'win') {
@@ -646,25 +563,13 @@ export class DungeonService {
           const enemyHPNow = dungeonState.enemy?.health?.current ?? 0;
           if (enemyHPNow <= 0 && prevEnemyHP > 0) {
             roomsCleared++;
-            await this.databaseService.logEvent(
-              dungeonRunId,
-              runLog.id,
-              'room_cleared',
-              `Room ${prevRoomNum} cleared! Moving to next room`,
-              { roomsCleared, prevRoom: prevRoomNum }
-            );
+            await logger.emit('room_cleared', `Room ${prevRoomNum} cleared! Moving to next room`, { roomsCleared, prevRoom: prevRoomNum });
           }
         }
         
         // Check completion
         if (dungeonState.isComplete) {
-          await this.databaseService.logEvent(
-            dungeonRunId,
-            runLog.id,
-            'run_completed',
-            `Run ${runNumber} completed! Cleared ${roomsCleared} rooms`,
-            { status: 'completed', roomsCleared, battlesWon, battlesLost, itemsGained, statsTally }
-          );
+          await logger.emit('run_completed', `Run ${runNumber} completed! Cleared ${roomsCleared} rooms`, { status: 'completed', roomsCleared, battlesWon, battlesLost, itemsGained, statsTally });
           
           // Keep token to satisfy server tracking for the next action
           console.log(`[TokenDebug] Run ${runNumber} COMPLETED - preserving token: ${gameClient.getActionToken()}`);
@@ -672,13 +577,7 @@ export class DungeonService {
         }
         
         if (dungeonState.player?.health?.current <= 0) {
-          await this.databaseService.logEvent(
-            dungeonRunId,
-            runLog.id,
-            'run_completed',
-            `Run ${runNumber} failed - Player died`,
-            { status: 'died', roomsCleared, battlesWon, battlesLost, itemsGained }
-          );
+          await logger.emit('run_completed', `Run ${runNumber} failed - Player died`, { status: 'died', roomsCleared, battlesWon, battlesLost, itemsGained });
           
           // Keep token; server may require prior token for tracking
           console.log(`[TokenDebug] Run ${runNumber} DIED - preserving token: ${gameClient.getActionToken()}`);
@@ -690,7 +589,8 @@ export class DungeonService {
       const endHP = dungeonState.player?.health?.current || 0;
       const finalStatus = dungeonState.isComplete ? 'completed' : 'died';
       
-      await this.databaseService.updateRunLog(runLog.id, {
+      const finz = new RunFinalizer(this.databaseService, logger);
+      await finz.completeRunLog(runLog.id, {
         status: finalStatus,
         rooms_cleared: roomsCleared,
         battles_won: battlesWon,
@@ -698,8 +598,7 @@ export class DungeonService {
         items_gained: itemsGained,
         moves,
         loot_choices: lootChoices,
-        player_stats: { startHP, endHP, maxHP },
-        end_time: new Date().toISOString()
+        player_stats: { startHP, endHP, maxHP }
       });
       
       console.log(`✅ Run ${runNumber} ${finalStatus}: ${roomsCleared} rooms, ${itemsGained} items`);
@@ -708,24 +607,15 @@ export class DungeonService {
     } catch (error) {
       console.error(`❌ Run ${runNumber} error:`, error);
       
-      await this.databaseService.logEvent(
-        dungeonRunId,
-        runLog.id,
-        'error',
-        `Run ${runNumber} error: ${formatError(error)}`,
-        { error: formatError(error) }
-      );
-
-      await this.databaseService.updateRunLog(runLog.id, {
-        status: 'error',
+      await logger.emit('error', `Run ${runNumber} error: ${formatError(error)}`, { error: formatError(error) });
+      const finz2 = new RunFinalizer(this.databaseService, logger);
+      await finz2.errorRunLog(runLog.id, formatError(error), {
         rooms_cleared: roomsCleared,
         battles_won: battlesWon,
         battles_lost: battlesLost,
         items_gained: itemsGained,
         moves,
-        loot_choices: lootChoices,
-        end_time: new Date().toISOString(),
-        error_message: formatError(error)
+        loot_choices: lootChoices
       });
       
       // Keep token; server may require prior token for next action
@@ -744,6 +634,7 @@ export class DungeonService {
     gearInstanceIds: string[]
   ): Promise<{ dungeonState: GigaverseDungeonState | null, isResumed: boolean }> {
     try {
+      const logger = new RunLogger(this.databaseService, dungeonRunId, runLogId);
       console.log(`[InitDebug] ========== DUNGEON INITIALIZATION START ==========`);
       console.log(`[InitDebug] dungeonRunId: ${dungeonRunId}`);
       console.log(`[InitDebug] runLogId: ${runLogId}`);
@@ -778,13 +669,7 @@ export class DungeonService {
             gameClient.setActionToken(statusResponse.actionToken);
           }
           
-          await this.databaseService.logEvent(
-            dungeonRunId,
-            runLogId,
-            'run_started',
-            `Resuming existing run at room ${existingState.currentRoom}`,
-            { resumed: true, room: existingState.currentRoom }
-          );
+          await logger.emit('run_started', `Resuming existing run at room ${existingState.currentRoom}`, { resumed: true, room: existingState.currentRoom });
           
           console.log(`[InitDebug] ✅ Resuming existing run at room ${existingState.currentRoom}`);
           return { dungeonState: existingState, isResumed: true };
@@ -845,13 +730,7 @@ export class DungeonService {
         throw new Error('Failed to parse initial dungeon state');
       }
       
-      await this.databaseService.logEvent(
-        dungeonRunId,
-        runLogId,
-        'run_started',
-        `Started new dungeon run`,
-        { resumed: false, room: dungeonState.currentRoom }
-      );
+      await logger.emit('run_started', `Started new dungeon run`, { resumed: false, room: dungeonState.currentRoom });
       
       console.log(`[InitDebug] ✅ Started new dungeon run at room ${dungeonState.currentRoom}`);
       console.log(`[InitDebug] ========== DUNGEON INITIALIZATION END ==========`);

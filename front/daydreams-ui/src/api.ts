@@ -126,7 +126,7 @@ export const Api = {
     gearInstanceIds?: string[];
     llmModel?: string;
   }): Promise<{ runId: string; status: string; message: string; }> {
-    return http(`/ns/daydreams/gigaverse/call`, { method: 'POST', body: JSON.stringify({ op: 'startRun', data: payload }) });
+    return http(`/ns/daydreams/gigaverse-dungeon/call`, { method: 'POST', body: JSON.stringify({ op: 'startRun', data: payload }) });
   }
   ,
   // Loot Survivor read-only operations

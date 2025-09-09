@@ -58,9 +58,9 @@ All service operations go through the Service Registry using namespaced routes:
 
 Examples:
 
-Start a Gigaverse run
+Start a Gigaverse Dungeon run
 ```
-curl -X POST localhost:4021/ns/daydreams/gigaverse/call \
+curl -X POST localhost:4021/ns/daydreams/gigaverse-dungeon/call \
   -H 'Content-Type: application/json' \
   -d '{
     "op":"startRun",
@@ -71,6 +71,22 @@ curl -X POST localhost:4021/ns/daydreams/gigaverse/call \
       "totalRuns":1,
       "llmModel":"google-vertex/gemini-2.5-flash",
       "context":"Be aggressive in combat. Prioritize upgrade or heal under 50%."
+    }
+  }'
+```
+
+Start a Gigaverse Fishing run
+```
+curl -X POST localhost:4021/ns/daydreams/gigaverse-fishing/call \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "op":"startRun",
+    "data":{
+      "playerAddress":"0x...",
+      "gigaverseToken":"<JWT>",
+      "runType":"normal",
+      "totalRuns":1,
+      "llmModel":"google-vertex/gemini-2.5-flash"
     }
   }'
 ```

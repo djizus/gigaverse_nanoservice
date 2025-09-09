@@ -11,7 +11,7 @@ export class GigaverseServicePlugin implements ServicePlugin {
   constructor(opts: { developer?: string; database: DatabaseService; agent?: DaydreamsAgentService }) {
     this.manifest = {
       developer: opts.developer || 'daydreams',
-      serviceId: 'gigaverse',
+      serviceId: 'gigaverse-dungeon',
       name: 'Gigaverse Dungeon Service',
       version: '1.0.0',
       summary: 'Runs Gigaverse dungeon runs and emits real-time events',
@@ -24,7 +24,7 @@ export class GigaverseServicePlugin implements ServicePlugin {
           { id: 'totalRuns', label: 'Runs', type: 'number', required: true, min: 1, max: 100, default: 1 },
           { id: 'llmModel', label: 'Model', type: 'text', required: false, default: 'google-vertex/gemini-2.5-flash' },
           { id: 'isJuiced', label: 'Juiced', type: 'checkbox', required: false, default: false },
-          { id: 'context', label: 'Instructions', type: 'textarea', required: true, default: 'Be aggressive in combat.\nPrioritize attack and armor upgrades when looting, but loot heal when you are below 50% health.'}
+          { id: 'user_instructions', label: 'User Instructions', type: 'textarea', required: true, default: 'Be aggressive in combat.\nPrioritize attack and armor upgrades when looting, but loot heal when you are below 50% health.'}
         ]
       }
     };
@@ -45,7 +45,7 @@ export class GigaverseServicePlugin implements ServicePlugin {
       case 'startRun': {
         // Expect same payload as existing Gigaverse dungeon schema
         const response = await this.dungeon.startDungeonRuns({
-          context: data.context,
+          user_instructions: data.user_instructions,
           playerAddress: data.playerAddress,
           gigaverseToken: data.gigaverseToken,
           totalRuns: data.totalRuns,
@@ -54,7 +54,7 @@ export class GigaverseServicePlugin implements ServicePlugin {
           consumables: data.consumables,
           gearInstanceIds: data.gearInstanceIds,
           llmModel: data.llmModel,
-        });
+        }, { serviceId: this.manifest.serviceId, developer: this.manifest.developer, meta: { source: 'ns', version: this.manifest.version } });
         return response;
       }
       default:

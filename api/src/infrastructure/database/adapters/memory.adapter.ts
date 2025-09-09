@@ -22,6 +22,9 @@ export class MemoryAdapter implements IDatabaseAdapter {
       is_juiced: !!input.is_juiced,
       consumables: input.consumables ?? [],
       gear_instance_ids: input.gear_instance_ids ?? [],
+      service_id: opts?.serviceId || 'gigaverse',
+      developer: opts?.developer || 'daydreams',
+      meta: opts?.meta || {},
       status: 'started',
       error_message: null,
       details: [],
@@ -144,4 +147,3 @@ export class MemoryAdapter implements IDatabaseAdapter {
     return { success: true, data: { summary: run, details } };
   }
 }
-

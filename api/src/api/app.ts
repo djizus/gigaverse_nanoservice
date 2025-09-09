@@ -20,7 +20,9 @@ import { createDungeonUiRoutes } from './routes/dungeon.ui.routes';
 import { ServiceRegistry, createServicesRoutes } from '../infrastructure/services/service-registry';
 import { createNamespacedServiceRoutes } from './routes/ns.routes';
 import { GigaverseServicePlugin } from '../services/gigaverse/gigaverse.plugin';
+import { GigaverseFishingServicePlugin } from '../services/gigaverse-fishing/gigaverse-fishing.plugin';
 import { LootSurvivorServicePlugin } from '../services/loot-survivor/loot-survivor.plugin';
+import { VegaTradingServicePlugin } from '../services/vega-trading/vega-trading.plugin';
 import { createUserAuthMiddleware } from '../shared/middleware/user-auth.middleware';
 
 export interface AppDeps {
@@ -139,14 +141,22 @@ export async function createApp(deps: AppDeps) {
 
   // Service Registry (namespaced services)
   const registry = new ServiceRegistry();
-  // Register Gigaverse plugin (developer default daydreams)
+  // Register Gigaverse Dungeon plugin (renamed)
   const gvPlugin = new GigaverseServicePlugin({ developer: 'daydreams', database: databaseService, agent: daydreamsAgent });
   await gvPlugin.init();
   registry.register(gvPlugin);
+  // Register Gigaverse Fishing plugin
+  const gvFishing = new GigaverseFishingServicePlugin({ developer: 'daydreams', database: databaseService, agent: daydreamsAgent });
+  await gvFishing.init();
+  registry.register(gvFishing);
   // Register Loot Survivor plugin (read-only)
   const lsPlugin = new LootSurvivorServicePlugin({ developer: 'daydreams', database: databaseService });
   await lsPlugin.init();
   registry.register(lsPlugin);
+  // Register Vega Trading plugin
+  const vega = new VegaTradingServicePlugin({ developer: 'daydreams', database: databaseService, agent: daydreamsAgent });
+  await vega.init();
+  registry.register(vega);
   app.route('/', createServicesRoutes(registry));
   app.route('/', createNamespacedServiceRoutes(registry));
   console.log(`🧩 Namespaced services available via /ns/:developer/:service/* endpoints`);

@@ -50,7 +50,8 @@ We support multiple independent nano‑services behind a generic interface, usin
   - Global events: `GET /dungeon/events`
 
 Existing plugins
-- Gigaverse: `api/src/services/gigaverse/gigaverse.plugin.ts` wraps `DungeonService`
+- Gigaverse Dungeon: `api/src/services/gigaverse/gigaverse.plugin.ts` wraps `DungeonService`
+- Gigaverse Fishing: `api/src/services/gigaverse-fishing/gigaverse-fishing.plugin.ts` (agent‑driven card plays)
 - Loot Survivor: `api/src/services/loot-survivor/*` ports LS-ENGINE (read‑only)
 
 UI
@@ -87,10 +88,16 @@ uiSchema conventions
 
 # API Examples
 
-Start a Gigaverse run
+Start a Gigaverse Dungeon run
 ```
-POST /ns/daydreams/gigaverse/call
+POST /ns/daydreams/gigaverse-dungeon/call
 { "op": "startRun", "data": { "playerAddress":"0x...", "gigaverseToken":"<JWT>", "dungeonId":1, "totalRuns":1, "llmModel":"google-vertex/gemini-2.5-flash", "context":"Be aggressive..." } }
+```
+
+Start a Gigaverse Fishing run
+```
+POST /ns/daydreams/gigaverse-fishing/call
+{ "op": "startRun", "data": { "playerAddress":"0x...", "gigaverseToken":"<JWT>", "runType":"normal", "totalRuns":1, "llmModel":"google-vertex/gemini-2.5-flash" } }
 ```
 
 Loot Survivor (read‑only)

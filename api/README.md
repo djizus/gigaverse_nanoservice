@@ -82,7 +82,7 @@ Execute automated dungeon runs with real-time event logging.
 
 ```json
 {
-  "context": "Be aggressive in combat, prioritize attack upgrades when looting",
+  "user_instructions": "Be aggressive in combat, prioritize attack upgrades when looting",
   "playerAddress": "0xE0CBF5Ef2B9E52A9CcC084a6Ab5e48E0E955C9b1",
   "gigaverseToken": "eyJhbGciOiJIUzI1NiJ9...",
   "totalRuns": 3,

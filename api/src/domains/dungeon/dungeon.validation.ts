@@ -2,7 +2,7 @@ import * as z from "zod";
 
 // Validation schemas for dungeon domain
 export const DungeonRequestSchema = z.object({
-  context: z.string().min(1, "Context instructions for agent are required"),
+  user_instructions: z.string().min(1, "User instructions are required"),
   playerAddress: z.string().regex(/^0x[a-fA-F0-9]{40}$/, "Must be a valid Ethereum address"),
   gigaverseToken: z.string().min(1, "Gigaverse authentication token is required"),
   totalRuns: z.number().int().min(1).max(100, "Total runs must be between 1 and 100"),

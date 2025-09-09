@@ -26,7 +26,9 @@ export function buildStrategyContext(
   userContext: string,
   opts?: { stage?: number; room?: number; absRoom?: number }
 ): string {
-  const base = (userContext || '').trim() || 'Maximize survival and progress with clear, legal moves.';
+  // Always include the agent's baseline guidance AND user-provided instructions.
+  const defaultBase = 'Maximize survival and progress with clear, legal moves.';
+  const base = [defaultBase, (userContext || '').trim()].filter(Boolean).join(' ');
   const loc = (opts?.stage && opts?.room)
     ? `Location: Stage ${opts.stage}-${opts.room}${opts?.absRoom ? ` (abs ${opts.absRoom})` : ''}`
     : undefined;

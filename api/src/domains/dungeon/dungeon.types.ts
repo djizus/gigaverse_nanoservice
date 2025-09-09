@@ -9,7 +9,7 @@ import {
 
 // Dungeon request interface with Gigaverse parameters
 export interface DungeonRequest {
-  context: string; // Instructions to give to the agent for decision making
+  user_instructions: string; // Additional user guidance to be added to agent context
   playerAddress: string; // Player wallet address
   gigaverseToken: string; // Authentication token for Gigaverse API
   totalRuns: number; // Total number of runs to complete

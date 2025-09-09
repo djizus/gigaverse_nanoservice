@@ -60,10 +60,22 @@ Set env via `.env` (see `.env.example`, `env.production.example`). Default port 
 
 ## API Examples
 
-Start a Gigaverse run
+Start a Gigaverse Dungeon run
 ```
-POST /ns/daydreams/gigaverse/call
-{ "op": "startRun", "data": { "playerAddress":"0x...", "gigaverseToken":"<JWT>", "dungeonId":1, "totalRuns":1, "llmModel":"google-vertex/gemini-2.5-flash", "context":"Be aggressive..." } }
+POST /ns/daydreams/gigaverse-dungeon/call
+{ "op": "startRun", "data": { "playerAddress":"0x...", "gigaverseToken":"<JWT>", "dungeonId":1, "totalRuns":1, "llmModel":"google-vertex/gemini-2.5-flash", "user_instructions":"Be aggressive..." } }
+```
+
+Start a Gigaverse Fishing run
+```
+POST /ns/daydreams/gigaverse-fishing/call
+{ "op": "startRun", "data": { "playerAddress":"0x...", "gigaverseToken":"<JWT>", "runType":"normal", "totalRuns":1, "llmModel":"google-vertex/gemini-2.5-flash", "user_instructions":"Turn 1: play wide coverage..." } }
+```
+
+Start a Vega Trading signal run
+```
+POST /ns/daydreams/vega-trading/call
+{ "op": "startRun", "data": { "symbol":"BTC-USD", "source":"gmx", "llmModel":"google-vertex/gemini-2.5-flash", "user_instructions":"Only signal when high confidence." } }
 ```
 
 Loot Survivor context

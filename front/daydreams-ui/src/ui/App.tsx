@@ -113,6 +113,19 @@ export function App() {
         setLiveEvents(prev => ({ ...map, ...prev }));
         if (Object.keys(svcMap).length) setRunServices(prev => ({ ...svcMap, ...prev }));
         if (Object.keys(metaMap).length) setRunsMeta(prev => ({ ...metaMap, ...prev }));
+
+        // Backfill details for adapters that don't include them in list (e.g., memory)
+        const needDetails = ids.filter(id => (map[id] || []).length === 0);
+        if (needDetails.length) {
+          try {
+            const fetched = await Promise.all(needDetails.map(async (id) => {
+              try { const d = await Api.getRun(id); return { id, details: d?.details || [] }; } catch { return { id, details: [] }; }
+            }));
+            const extra: Record<string, any[]> = {};
+            for (const f of fetched) { extra[f.id] = (f.details || []).map((d: any) => ({ type: d.event_type || d.type, timestamp: d.timestamp, ...d })); }
+            if (Object.keys(extra).length) setLiveEvents(prev => ({ ...extra, ...prev }));
+          } catch {}
+        }
       } catch (e: any) {
         setError(`Runs load failed: ${e.message || e}`);
       }
@@ -165,6 +178,16 @@ export function App() {
           if (!evt?.runId) return;
           setLiveEvents(prev => ({ ...prev, [evt.runId]: [...(prev[evt.runId] || []), evt] }));
           setLiveRuns(prev => (prev.includes(evt.runId) ? prev : [evt.runId, ...prev]));
+          // Update local status hints based on event type
+          const t = String(evt.type || evt.event_type || '').toLowerCase();
+          setRunsMeta(prev => {
+            const cur = prev[evt.runId] || {};
+            let status = cur.status || 'started';
+            if (t === 'all_runs_completed' || t === 'run_completed') status = 'completed';
+            else if (t === 'error') status = 'failed';
+            else if (!cur.status || cur.status === 'started') status = 'processing';
+            return { ...prev, [evt.runId]: { ...cur, status } };
+          });
         } catch {}
       };
       es.onerror = () => { /* auto-reconnect by browser */ };
@@ -369,6 +392,16 @@ export function App() {
     const dev = svc.developer || 'daydreams';
     const storeKey = `svc_profiles:${svc.serviceId}`;
     const profiles: Record<string, any> = (() => { try { return JSON.parse(localStorage.getItem(storeKey) || '{}'); } catch { return {}; } })();
+    const [hidden, setHidden] = useState<Record<string, boolean>>({});
+
+    // Autosave "last" profile for quick reuse
+    useEffect(() => {
+      if (!svcModalOpen) return;
+      try {
+        const next = { ...profiles, __last: nsForm };
+        localStorage.setItem(storeKey, JSON.stringify(next));
+      } catch {}
+    }, [nsForm]);
     return (
       <div className="modal" style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.45)', display:'flex', alignItems:'center', justifyContent:'center', zIndex: 50 }}>
         <div className="card" style={{ width: 640, maxHeight: '80vh', overflow: 'auto' }}>
@@ -398,16 +431,48 @@ export function App() {
                   {f.label}
                 </label>
               );
-              if (f.type === 'textarea') return (
-                <div key={f.id} style={{ marginBottom: 8 }}>
-                  <label>{f.label}</label>
-                  <textarea style={{ minHeight: 100 }} placeholder={f.placeholder || ''} value={val} onChange={(e)=> setNsForm(prev=>({ ...prev, [f.id]: e.target.value }))} />
-                </div>
-              );
+              if (f.type === 'select') {
+                const opts: string[] = Array.isArray(f.options) ? f.options : (Array.isArray(f.enum) ? f.enum : []);
+                return (
+                  <div key={f.id} style={{ marginBottom: 8 }}>
+                    <label>{f.label}</label>
+                    <select value={String(val ?? '')} onChange={(e)=> setNsForm(prev=>({ ...prev, [f.id]: e.target.value }))}>
+                      {!val && <option value="">-- select --</option>}
+                      {opts.map((o) => <option key={o} value={o}>{o}</option>)}
+                    </select>
+                  </div>
+                );
+              }
+              if (f.type === 'textarea') {
+                const isToken = String(f.id).toLowerCase().includes('token') || String(f.label||'').toLowerCase().includes('token');
+                const isHidden = !!hidden[f.id];
+                return (
+                  <div key={f.id} style={{ marginBottom: 8 }}>
+                    <div className="row" style={{ alignItems:'center' }}>
+                      <label>{f.label}</label>
+                      {isToken && (
+                        <div className="toolbar" style={{ marginLeft: 'auto', gap: 6 }}>
+                          <button className="btn" type="button" onClick={async ()=>{ try { const text = await navigator.clipboard.readText(); setNsForm(prev=>({ ...prev, [f.id]: text })); } catch {} }}>Paste</button>
+                          <button className="btn" type="button" onClick={()=> setHidden(prev=>({ ...prev, [f.id]: !prev[f.id] }))}>{isHidden ? 'Show' : 'Hide'}</button>
+                        </div>
+                      )}
+                    </div>
+                    <div style={{ position:'relative' }}>
+                      <textarea style={{ minHeight: 100, filter: isHidden ? 'blur(4px)' : 'none' }} placeholder={f.placeholder || ''} value={val} onChange={(e)=> setNsForm(prev=>({ ...prev, [f.id]: e.target.value }))} />
+                    </div>
+                  </div>
+                );
+              }
               return (
                 <div key={f.id} style={{ marginBottom: 8 }}>
                   <label>{f.label}</label>
-                  <input type={f.type==='number' ? 'number' : 'text'} placeholder={f.placeholder || ''} value={val} onChange={(e)=> setNsForm(prev=>({ ...prev, [f.id]: f.type==='number' ? parseInt(e.target.value||'0') : e.target.value }))} />
+                  <input
+                    type={f.type==='number' ? 'text' : 'text'}
+                    inputMode={f.type==='number' ? 'numeric' : undefined}
+                    placeholder={f.placeholder || ''}
+                    value={String(val ?? '')}
+                    onChange={(e)=> setNsForm(prev=>({ ...prev, [f.id]: e.target.value }))}
+                  />
                 </div>
               );
             })}
@@ -422,7 +487,11 @@ export function App() {
                 let v = has ? nsForm[f.id] : undefined;
                 if (v === undefined || v === '') v = f.default;
                 if (f.type === 'checkbox') v = !!v;
-                if (f.type === 'number' && typeof v === 'string') v = parseInt(v || '0');
+                if (f.type === 'number') {
+                  const raw = String(v ?? '');
+                  const parsed = raw.trim() === '' ? NaN : parseInt(raw, 10);
+                  v = parsed;
+                }
                 data[f.id] = v;
               }
               // simple validation
@@ -436,7 +505,14 @@ export function App() {
               }
               setLoading(true); setError(null);
               const res = await Api.callService(svc.serviceId, dev, 'startRun', data);
-              if (res?.runId) { setLiveRuns(prev => prev.includes(res.runId) ? prev : [res.runId, ...prev]); setToast(`Run started: ${res.runId.slice(0,8)}...`); }
+              if (res?.runId) {
+                setLiveRuns(prev => prev.includes(res.runId) ? prev : [res.runId, ...prev]);
+                setRunServices(prev => ({ ...prev, [res.runId]: svc.serviceId }));
+                setRunsMeta(prev => ({ ...prev, [res.runId]: { status: res.status || 'started', created_at: new Date().toISOString(), service_id: svc.serviceId } }));
+                setSelectedRunId(res.runId);
+                setPage('runs');
+                setToast(`Run started: ${res.runId.slice(0,8)}...`);
+              }
               setSvcModalOpen(false);
             } catch (e:any) { setError(e.message); } finally { setLoading(false); } }}>Start</button>
             <button className="btn" onClick={()=> setSvcModalOpen(false)}>Cancel</button>
@@ -479,7 +555,26 @@ export function App() {
                     <div style={{ fontWeight: 600 }}>{s.serviceId}</div>
                     <div style={{ color:'#666' }}>{s.version}</div>
                     <div style={{ marginLeft: 'auto' }} className="toolbar">
-                      <button className="btn btn-primary" onClick={()=>{ setSelectedService(s.serviceId); setSvcModalFor(s); setNsForm({}); setSvcModalOpen(true); }}>Launch</button>
+                      <button className="btn btn-primary" onClick={()=>{
+                        setSelectedService(s.serviceId);
+                        setSvcModalFor(s);
+                        // Prefer last-used values; otherwise, schema defaults
+                        try {
+                          const storeKey = `svc_profiles:${s.serviceId}`;
+                          const saved = JSON.parse(localStorage.getItem(storeKey) || '{}');
+                          const last = saved && saved.__last ? saved.__last : {};
+                          if (last && Object.keys(last).length) setNsForm(last);
+                          else {
+                            const init: Record<string, any> = {};
+                            const fields = (s.uiSchema?.fields || []) as any[];
+                            for (const f of fields) init[f.id] = f.default ?? (f.type==='checkbox' ? false : '');
+                            setNsForm(init);
+                          }
+                        } catch {
+                          setNsForm({});
+                        }
+                        setSvcModalOpen(true);
+                      }}>Launch</button>
                     </div>
                   </div>
                   {s.summary && <div style={{ color:'#666' }}>{s.summary}</div>}
@@ -591,6 +686,14 @@ export function App() {
                     const meta: Record<string, any> = {}; const svcMap: Record<string, string> = {};
                     for (const r of runs) { meta[r.id] = { status: r.status, created_at: r.created_at, service_id: r.service_id }; if (r.service_id) svcMap[r.id]=r.service_id; }
                     setRunsMeta(meta); setRunServices(svcMap);
+
+                    // Also fetch details to avoid "waiting..." for completed runs
+                    const fetched = await Promise.all(ids.map(async (id: string) => {
+                      try { const d = await Api.getRun(id); return { id, details: d?.details || [] }; } catch { return { id, details: [] }; }
+                    }));
+                    const eventsMap: Record<string, any[]> = {};
+                    for (const f of fetched) { eventsMap[f.id] = (f.details || []).map((d: any) => ({ type: d.event_type || d.type, timestamp: d.timestamp, ...d })); }
+                    setLiveEvents(eventsMap);
                   } finally { setLoading(false); }
                 }}>Refresh</button>
               </div>
@@ -627,7 +730,7 @@ export function App() {
                   <div style={{ flex: 1 }}>
                     <div style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis' }}>{rid}</div>
                     <div style={{ fontSize: 12, color: '#666', display: 'flex', gap: 8, alignItems: 'center' }}>
-                      <span>{last ? `${last.type} · ${new Date(last.timestamp || Date.now()).toLocaleTimeString()}` : 'waiting...'}</span>
+                      <span>{last ? `${last.type} · ${new Date(last.timestamp || Date.now()).toLocaleTimeString()}` : (runsMeta[rid]?.status ? runsMeta[rid]?.status : 'waiting...')}</span>
                       {runServices[rid] && (<span className="badge">{runServices[rid]}</span>)}
                       {runsMeta[rid]?.status && (<span className="badge">{runsMeta[rid]?.status}</span>)}
                       {stage && roomInStage && (

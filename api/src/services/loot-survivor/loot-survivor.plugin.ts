@@ -2,6 +2,8 @@ import { ServiceManifest, ServicePlugin } from '../../infrastructure/services/se
 import { DatabaseService } from '../../infrastructure/database/database.service';
 import { GameStateService, GameStateConfig } from './engine/GameStateService';
 import { ContextEngine } from './engine/ContextEngine';
+import { RunLogger } from '../../shared/logging/run-logger';
+import { RunFinalizer } from '../../shared/logging/run-finalizer';
 
 export class LootSurvivorServicePlugin implements ServicePlugin {
   manifest: ServiceManifest;
@@ -22,6 +24,7 @@ export class LootSurvivorServicePlugin implements ServicePlugin {
         fields: [
           { id: 'gameId', label: 'Game ID', type: 'number', required: true },
           { id: 'llmModel', label: 'Model (optional)', type: 'text' },
+          { id: 'user_instructions', label: 'User Instructions (future)', type: 'textarea', required: false, default: 'Read-only context capture' },
         ]
       }
     };
@@ -52,9 +55,10 @@ export class LootSurvivorServicePlugin implements ServicePlugin {
         const gameId = Number(data?.gameId);
         if (!gameId) throw new Error('gameId required');
         const llmModel = data?.llmModel || 'google-vertex/gemini-2.5-flash';
+        const user_instructions = data?.user_instructions || '';
         const create = await this.db.createDungeonRun({
           player_address: `ls:${gameId}`,
-          context: 'loot-survivor',
+          context: user_instructions || 'loot-survivor',
           llm_model: llmModel,
           total_runs: 1,
           dungeon_id: 0,
@@ -66,16 +70,17 @@ export class LootSurvivorServicePlugin implements ServicePlugin {
         const runId = create.data.id;
         const log = await this.db.createRunLog({ dungeon_run_id: runId, run_number: 1 });
         const runLogId = log.success && log.data ? log.data.id : null;
-        await this.db.logEvent(runId, runLogId || '0', 'run_started', `Loot Survivor read-only run for game ${gameId}`, { gameId });
+        const logger = new RunLogger(this.db, runId, runLogId);
+        await logger.emit('run_started', `Loot Survivor read-only run for game ${gameId}`, { gameId });
         try {
           const state = await this.engine.getGameState(gameId);
           const ctx = this.contextEngine.generateContext(state);
-          await this.db.createRunEvent({ dungeon_run_id: runId, run_log_id: runLogId, event_type: 'loot_phase', message: 'Context snapshot', event_data: { xml: ctx.content.slice(0, 4000) } });
+          await logger.emit('loot_phase', 'Context snapshot', { xml: ctx.content.slice(0, 4000) });
         } catch (e: any) {
-          await this.db.createRunEvent({ dungeon_run_id: runId, run_log_id: runLogId, event_type: 'error', message: `Context fetch failed: ${e?.message || e}` });
+          await logger.emit('error', `Context fetch failed: ${e?.message || e}`);
         }
-        await this.db.updateDungeonRun(runId, { completed_at: new Date().toISOString(), completed_runs: 1, status: 'completed' });
-        await this.db.createRunEvent({ dungeon_run_id: runId, run_log_id: runLogId, event_type: 'run_completed', message: 'Read-only run completed', event_data: { status: 'completed' } });
+        const finalizer = new RunFinalizer(this.db, logger);
+        await finalizer.completeSession(runId, { completedRuns: 1, totalRuns: 1 }, { emitRunCompleted: true });
         return { runId, status: 'completed', message: `LS read-only run completed for game ${gameId}` };
       }
       default:
@@ -83,4 +88,3 @@ export class LootSurvivorServicePlugin implements ServicePlugin {
     }
   }
 }
-
