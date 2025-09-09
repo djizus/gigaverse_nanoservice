@@ -1,0 +1,28 @@
+version: '3.9'
+services:
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile.daydreams
+    environment:
+      - PORT=4021
+      - DAYDREAMS_USE_MEMORY=true
+      - CORS_ORIGIN=http://localhost:8080
+    ports:
+      - "4021:4021"
+    restart: unless-stopped
+
+  site:
+    build:
+      context: ./apps/site
+      dockerfile: Dockerfile
+      args:
+        - VITE_API_URL=http://api:4021
+        # Optional: set these at build time or leave empty
+        - VITE_SUPABASE_URL=
+        - VITE_SUPABASE_ANON_KEY=
+    depends_on:
+      - api
+    ports:
+      - "8080:80"
+    restart: unless-stopped
